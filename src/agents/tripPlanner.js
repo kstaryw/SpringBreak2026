@@ -147,7 +147,7 @@ You MUST return strict JSON only (no markdown, no prose outside JSON) with this 
   "flightOptions": [{"id":"f1","label":"...","airline":"...","route":"...","class":"economy|business","outboundDepartureLocal":"2026-03-21T19:00:00-04:00","outboundArrivalLocal":"2026-03-22T08:30:00+01:00","returnDepartureLocal":"2026-03-29T10:00:00+01:00","returnArrivalLocal":"2026-03-29T13:00:00-04:00","daysAtDestination":8,"nightsAtDestination":7,"costUsd":1200,"notes":"..."}],
   "hotelOptions": [{"id":"h1","label":"...","stars":4,"nightlyUsd":250,"nights":7,"costUsd":1750,"notes":"..."}],
   "carRentalOptions": [{"id":"c1","label":"...","company":"...","carType":"...","dailyRateUsd":50,"rentalDays":8,"costUsd":400,"notes":"..."}],
-  "activityIdeas": [{"name":"...","category":"museums","estimatedCostUsd":40,"whyFit":"..."}],
+  "activityIdeas": [{"name":"...","category":"museums","location":"specific place or address for map pin","estimatedCostUsd":40,"whyFit":"..."}],
   "researchNotes": ["..."],
   "pricingDateNote": "state pricing date caveat"
 }
@@ -164,6 +164,7 @@ IMPORTANT — activityIdeas:
 • Activities MUST be real, well-known attractions or experiences located IN or very near the destination city.
   Do NOT suggest activities from other cities or countries.
 • If the destination is Hong Kong, suggest Hong Kong activities; if Paris, suggest Paris activities; etc.
+• Every activityIdea MUST include a "location" field with a specific, geocodable place name or address (e.g. "Victoria Peak, Hong Kong" or "Musée d'Orsay, Paris").
 Never suggest making purchases.`,
   tools: [researchWebSearchTool, budgetCalculatorTool]
 });
@@ -204,7 +205,7 @@ Given user preferences plus research and safety JSON, return strict JSON only wi
     "hotel": {"options": [], "recommendedOptionId": "h1", "confirmationQuestion": "..."},
     "carRental": {"options": [], "recommendedOptionId": "c1", "confirmationQuestion": "..."}
   },
-  "activities": [{"name":"...","category":"museums","estimatedCostUsd":0,"scheduledDay":"Day 1","notes":"..."}],
+  "activities": [{"name":"...","category":"museums","location":"specific place or address","estimatedCostUsd":0,"scheduledDay":"Day 1","notes":"..."}],
   "safetyConcerns": ["..."],
   "packingList": ["..."],
   "estimatedCostSummary": {
@@ -316,7 +317,7 @@ export async function buildItineraryDraft(preferences, options = {}) {
     "",
     `Destination city: ${preferences.destinationCity || "unknown"}`,
     `Requested activity categories (${activityCategories.length}): ${activityCategories.join(", ") || "general"}`,
-    `Return exactly 3 activityIdeas PER category above (${activityCategories.length * 3} total). Each must include a "category" field matching the category name. All activities MUST be real places/experiences in ${preferences.destinationCity || "the destination city"}.`,
+    `Return exactly 3 activityIdeas PER category above (${activityCategories.length * 3} total). Each must include a "category" field matching the category name and a "location" field with the specific geocodable place name or address (e.g. "Victoria Peak, Hong Kong"). All activities MUST be real places/experiences in ${preferences.destinationCity || "the destination city"}.`,
     "Use web search for realistic price ranges and providers."
   ].join("\n");
 
@@ -517,6 +518,7 @@ function normalizeItinerary(rawItinerary, researchJson, safetyJson, preferences)
     ? itinerary.activities.map((a, i) => ({
         name: a.name,
         category: a.category || "",
+        location: a.location || "",
         estimatedCostUsd: a.estimatedCostUsd ?? 0,
         scheduledDay: a.scheduledDay || `Day ${i + 1}`,
         notes: a.notes || ""
@@ -524,6 +526,7 @@ function normalizeItinerary(rawItinerary, researchJson, safetyJson, preferences)
     : (researchJson.activityIdeas ?? []).map((activity, index) => ({
         name: activity.name,
         category: activity.category || "",
+        location: activity.location || "",
         estimatedCostUsd: activity.estimatedCostUsd ?? 0,
         scheduledDay: `Day ${index + 1}`,
         notes: activity.whyFit ?? ""

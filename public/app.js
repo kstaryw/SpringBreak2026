@@ -1061,18 +1061,27 @@ async function renderItineraryMap(planData) {
 function buildMapPlaces(planData, destination) {
   const itinerary = planData?.itinerary || {};
   const hotelOptions = itinerary?.components?.hotel?.options || [];
-  const activityOptions = planData?.activityConfirmed
-    ? getConfirmedActivityOptions(planData)
-    : getAllActivityOptions(planData);
+
+  // Before confirmation: show ALL activities from itinerary (not filtered by category)
+  // After confirmation: show only confirmed selections
+  let activityOptions;
+  if (planData?.activityConfirmed) {
+    activityOptions = getConfirmedActivityOptions(planData);
+  } else {
+    // Use all itinerary activities directly so every activity appears on the map
+    activityOptions = normalizeActivities(itinerary?.activities || []);
+  }
+
   const seen = new Set();
   const places = [];
 
-  const addPlace = (type, label) => {
+  const addPlace = (type, label, geocodeQuery) => {
     const cleanLabel = String(label || "").trim();
     if (!cleanLabel) return;
-    const withDestination = destination && !cleanLabel.toLowerCase().includes(destination.toLowerCase())
-      ? `${cleanLabel}, ${destination}`
-      : cleanLabel;
+    const query = geocodeQuery || cleanLabel;
+    const withDestination = destination && !query.toLowerCase().includes(destination.toLowerCase())
+      ? `${query}, ${destination}`
+      : query;
     const dedupeKey = `${type}:${withDestination.toLowerCase()}`;
     if (seen.has(dedupeKey)) return;
     seen.add(dedupeKey);
@@ -1084,11 +1093,14 @@ function buildMapPlaces(planData, destination) {
   });
 
   activityOptions.forEach((activity) => {
-    const label =
-      typeof activity === "string"
-        ? activity
-        : `${activity.name || activity.location || activity.title}${activity.category ? ` (${activity.category})` : ""}`;
-    addPlace("activity", label);
+    if (typeof activity === "string") {
+      addPlace("activity", activity);
+      return;
+    }
+    const label = `${activity.name || activity.title || ""}${activity.category ? ` (${activity.category})` : ""}`;
+    // Prefer the location field for geocoding (more precise address/place)
+    const geocodeQuery = activity.location || activity.name || activity.title || "";
+    addPlace("activity", label, geocodeQuery);
   });
 
   return places;
@@ -1436,6 +1448,7 @@ function normalizeActivities(items) {
         id: String(activity?.id || `activity-${index}`),
         name: String(activity?.name || `Activity ${index + 1}`),
         category: String(activity?.category || "").toLowerCase().trim(),
+        location: String(activity?.location || ""),
         estimatedCostUsd: Number(activity?.estimatedCostUsd || 0),
         scheduledDay: String(activity?.scheduledDay || ""),
         notes: String(activity?.notes || "")
