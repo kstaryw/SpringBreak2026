@@ -89,6 +89,67 @@ button:disabled {
   padding: 8px;
 }
 
+.option-facts {
+  display: grid;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.option-fact-row {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 8px;
+  align-items: start;
+  font-size: 13px;
+}
+
+.option-fact-label {
+  color: #6b7280;
+}
+
+.option-fact-value {
+  color: #111827;
+  font-weight: 500;
+}
+
+.cost-summary-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.cost-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+}
+
+.cost-label {
+  color: #4b5563;
+}
+
+.cost-value {
+  color: #111827;
+  font-weight: 600;
+}
+
+.cost-total {
+  border-top: 1px solid #e5e7eb;
+  padding-top: 8px;
+  margin-top: 2px;
+}
+
+.cost-total .cost-label,
+.cost-total .cost-value {
+  color: #111827;
+  font-weight: 700;
+}
+
 .muted {
   color: #6b7280;
   font-size: 14px;

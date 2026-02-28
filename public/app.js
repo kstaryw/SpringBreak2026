@@ -475,6 +475,7 @@ function renderItinerary(planData) {
     <h2>Itinerary Draft</h2>
     <p>${escapeHtml(itinerary.tripSummary)}</p>
     <p class="muted">${escapeHtml(itinerary.disclaimer || "")}</p>
+    <div id="itinerary-status" class="muted"></div>
     <div id="components"></div>
     <h3>Activities</h3>
     ${renderActivityList(itinerary.activities || [])}
@@ -483,7 +484,7 @@ function renderItinerary(planData) {
     <h3>Packing List</h3>
     ${renderSimpleList(itinerary.packingList || [])}
     <h3>Estimated Cost Summary (USD)</h3>
-    <pre>${escapeHtml(JSON.stringify(itinerary.estimatedCostSummary, null, 2))}</pre>
+    ${renderCostSummary(itinerary.estimatedCostSummary || {})}
     <div id="final-review"></div>
   `;
 
@@ -505,6 +506,7 @@ function renderItinerary(planData) {
         } />
               <strong>${escapeHtml(option.label || option.id)}</strong>
             </div>
+            ${renderOptionQuickFacts(componentType, option)}
             <div class="muted">${escapeHtml(option.notes || "")}</div>
             <details>
               <summary>Show JSON</summary>
@@ -568,17 +570,28 @@ function attachConfirmHandlers(itineraryId) {
 
         if (!data.nextComponentToConfirm) {
           currentPlan = { ...currentPlan, finalReview: data.finalReview ?? null };
-          setMessage("All components confirmed. Please review final summary.");
+          setItineraryStatus("All components confirmed. Please review final summary.");
           maybeRenderFinalAction(currentPlan);
         } else {
-          setMessage(`Confirmed ${componentType}. Next: confirm ${data.nextComponentToConfirm}.`);
+          setItineraryStatus(`Confirmed ${componentType}. Next: confirm ${data.nextComponentToConfirm}.`);
         }
       } catch (error) {
         button.disabled = false;
-        setMessage(error.message || "Unexpected confirmation error", true);
+        setItineraryStatus(error.message || "Unexpected confirmation error", true);
       }
     });
   });
+}
+
+function setItineraryStatus(message, isError = false) {
+  const status = document.getElementById("itinerary-status");
+  if (!status) {
+    setMessage(message, isError);
+    return;
+  }
+
+  status.className = isError ? "" : "muted";
+  status.textContent = message;
 }
 
 function maybeRenderFinalAction(planData) {
@@ -620,6 +633,110 @@ function maybeRenderFinalAction(planData) {
 function renderSimpleList(items) {
   if (!items.length) return "<p class=\"muted\">No items.</p>";
   return `<ul class=\"list\">${items.map((item) => `<li>${escapeHtml(String(item))}</li>`).join("")}</ul>`;
+}
+
+function renderCostSummary(costs) {
+  const lines = [
+    ["Flight", Number(costs.flightUsd) || 0],
+    ["Hotel", Number(costs.hotelUsd) || 0],
+    ["Car Rental", Number(costs.carRentalUsd) || 0],
+    ["Activities", Number(costs.activitiesUsd) || 0]
+  ];
+
+  const rows = lines
+    .map(([label, value]) => {
+      return `
+        <div class="cost-row">
+          <span class="cost-label">${escapeHtml(label)}</span>
+          <span class="cost-value">${escapeHtml(formatUsd(value) || "$0")}</span>
+        </div>
+      `;
+    })
+    .join("");
+
+  const total = formatUsd(Number(costs.totalUsd) || 0) || "$0";
+
+  return `
+    <div class="cost-summary-card">
+      ${rows}
+      <div class="cost-row cost-total">
+        <span class="cost-label">Total</span>
+        <span class="cost-value">${escapeHtml(total)}</span>
+      </div>
+    </div>
+  `;
+}
+
+function renderOptionQuickFacts(componentType, option) {
+  const facts = [];
+
+  if (componentType === "flight") {
+    facts.push(
+      ["Price", formatUsd(option.costUsd)],
+      ["Airline", option.airline],
+      ["Route", option.route],
+      ["Class", option.class],
+      ["Outbound", `${formatDateTime(option.outboundDepartureLocal)} → ${formatDateTime(option.outboundArrivalLocal)}`],
+      ["Return", `${formatDateTime(option.returnDepartureLocal)} → ${formatDateTime(option.returnArrivalLocal)}`],
+      ["Stay", formatStay(option.daysAtDestination, option.nightsAtDestination)]
+    );
+  } else if (componentType === "hotel") {
+    facts.push(
+      ["Total", formatUsd(option.costUsd)],
+      ["Nightly", formatUsd(option.nightlyUsd)],
+      ["Nights", option.nights],
+      ["Stars", option.stars ? `${option.stars}★` : null]
+    );
+  } else if (componentType === "carRental") {
+    facts.push(
+      ["Total", formatUsd(option.costUsd)],
+      ["Daily", formatUsd(option.dailyRateUsd)],
+      ["Days", option.rentalDays],
+      ["Company", option.company],
+      ["Car Type", option.carType]
+    );
+  }
+
+  const rows = facts
+    .filter(([, value]) => value !== null && value !== undefined && String(value).trim() !== "")
+    .map(([label, value]) => {
+      return `
+        <div class="option-fact-row">
+          <span class="option-fact-label">${escapeHtml(String(label))}</span>
+          <span class="option-fact-value">${escapeHtml(String(value))}</span>
+        </div>
+      `;
+    })
+    .join("");
+
+  if (!rows) return "";
+  return `<div class="option-facts">${rows}</div>`;
+}
+
+function formatUsd(value) {
+  if (typeof value !== "number" || Number.isNaN(value)) return null;
+  return `$${value.toLocaleString("en-US")}`;
+}
+
+function formatDateTime(value) {
+  if (!value || typeof value !== "string") return "-";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+  return parsed.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  });
+}
+
+function formatStay(days, nights) {
+  if (typeof days !== "number" && typeof nights !== "number") return null;
+  const safeDays = typeof days === "number" ? days : 0;
+  const safeNights = typeof nights === "number" ? nights : 0;
+  return `${safeDays} day${safeDays === 1 ? "" : "s"} / ${safeNights} night${safeNights === 1 ? "" : "s"}`;
 }
 
 function renderActivityList(items) {
