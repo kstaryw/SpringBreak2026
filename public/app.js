@@ -19,6 +19,7 @@ const TOOL_MONITOR_TYPES = new Set([
 let currentPlan = null;
 const activityGroups = new Map();
 const activityGroupMeta = new Map();
+const toolSummaryGroups = new Map();
 const STAGE_FLOW = ["initialization", "research", "safety", "composition", "done"];
 const stageState = {
   active: null,
@@ -139,6 +140,7 @@ function resetTimeline() {
   activityList.innerHTML = "";
   activityGroups.clear();
   activityGroupMeta.clear();
+  toolSummaryGroups.clear();
   stageState.active = null;
   stageState.completed.clear();
   renderProgressStepper();
@@ -274,18 +276,26 @@ function ensureActivityGroup(agentName) {
 }
 
 function addToolMonitorItem(event) {
-  const item = document.createElement("li");
-  item.className = "activity-item";
+  const toolName = event.toolName || "unknown_tool";
+  const bucket = ensureToolSummaryBucket(toolName);
+  const timestamp = event.ts ? new Date(event.ts) : new Date();
+  const time = timestamp.toLocaleTimeString();
+  const hasError = detectToolEventError(event);
 
-  const time = new Date().toLocaleTimeString();
-  const title = `[${event.type || "tool"}] ${event.toolName || "unknown_tool"}`;
+  bucket.count += 1;
+  bucket.lastAt = timestamp;
+  if (hasError) {
+    bucket.errorCount += 1;
+  }
 
-  const details = [
-    renderDetailBlock("Agent", event.agent),
-    renderDetailBlock("Stage", event.stage),
-    renderDetailBlock("Source", event.source),
-    renderDetailBlock("Family", event.toolFamily),
-    renderDetailBlock("Phase", event.phase),
+  bucket.countNode.textContent = `${bucket.count}`;
+  bucket.lastNode.textContent = time;
+  bucket.errorNode.textContent = `${bucket.errorCount}`;
+
+  const callItem = document.createElement("li");
+  callItem.className = "tool-call-item";
+
+  const callDetails = [
     renderDetailBlock("Arguments", event.arguments),
     renderDetailBlock("Output", event.output),
     renderDetailBlock("Raw Item", event.rawItem),
@@ -294,13 +304,77 @@ function addToolMonitorItem(event) {
     .filter(Boolean)
     .join("");
 
-  item.innerHTML = `
+  const callTitle = `[${event.type || "tool"}] ${event.agent || "System"} • ${event.stage || "general"}`;
+  callItem.innerHTML = `
     <div class="activity-time">${escapeHtml(time)}</div>
-    <div>${escapeHtml(title)}</div>
-    ${details}
+    <div>${escapeHtml(callTitle)}${hasError ? " <strong>• error</strong>" : ""}</div>
+    ${callDetails}
   `;
 
+  bucket.callsList.prepend(callItem);
+}
+
+function ensureToolSummaryBucket(toolName) {
+  if (toolSummaryGroups.has(toolName)) {
+    return toolSummaryGroups.get(toolName);
+  }
+
+  const item = document.createElement("li");
+  item.className = "tool-summary-item";
+
+  const details = document.createElement("details");
+  details.open = false;
+
+  const summary = document.createElement("summary");
+  summary.className = "tool-summary-header";
+
+  const nameNode = document.createElement("span");
+  nameNode.className = "tool-summary-name";
+  nameNode.textContent = toolName;
+
+  const statsNode = document.createElement("span");
+  statsNode.className = "tool-summary-stats";
+  statsNode.innerHTML = `count: <strong>0</strong> • last: <strong>-</strong> • errors: <strong>0</strong>`;
+
+  summary.appendChild(nameNode);
+  summary.appendChild(statsNode);
+
+  const body = document.createElement("div");
+  body.className = "tool-summary-body";
+
+  const callsList = document.createElement("ul");
+  callsList.className = "tool-calls-list";
+
+  body.appendChild(callsList);
+  details.appendChild(summary);
+  details.appendChild(body);
+  item.appendChild(details);
   toolMonitorList.appendChild(item);
+
+  const strongNodes = statsNode.querySelectorAll("strong");
+  const bucket = {
+    count: 0,
+    errorCount: 0,
+    lastAt: null,
+    countNode: strongNodes[0],
+    lastNode: strongNodes[1],
+    errorNode: strongNodes[2],
+    callsList
+  };
+
+  toolSummaryGroups.set(toolName, bucket);
+  return bucket;
+}
+
+function detectToolEventError(event) {
+  if (!event) return false;
+  if (event.error) return true;
+
+  const outputText = String(event.output || "");
+  const messageText = String(event.message || "");
+  const combined = `${outputText} ${messageText}`.toLowerCase();
+
+  return combined.includes("error") || combined.includes("failed") || combined.includes("exception");
 }
 
 function renderDetailBlock(label, value) {

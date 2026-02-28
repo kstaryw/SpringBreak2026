@@ -190,6 +190,53 @@ button:disabled {
   padding: 0;
 }
 
+.tool-summary-item {
+  list-style: none;
+}
+
+.tool-summary-item > details {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 6px 8px;
+  background: #fff;
+}
+
+.tool-summary-header {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.tool-summary-name {
+  font-weight: 600;
+  color: #111827;
+}
+
+.tool-summary-stats {
+  color: #4b5563;
+  font-size: 12px;
+}
+
+.tool-summary-body {
+  margin-top: 8px;
+}
+
+.tool-calls-list {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.tool-call-item {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 8px;
+}
+
 .activity-item {
   border: 1px solid #e5e7eb;
   border-radius: 8px;
