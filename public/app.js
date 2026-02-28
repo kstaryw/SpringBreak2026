@@ -160,13 +160,21 @@ function addActivity(eventData) {
   item.className = "activity-item";
 
   const time = new Date().toLocaleTimeString();
-  const summary = event.summary ? `<div class="activity-summary">${escapeHtml(JSON.stringify(event.summary))}</div>` : "";
+  const stageSummary =
+    eventType === "stage_completed" && event.stage_summary
+      ? renderStageSummaryCard(event.stage, event.stage_summary)
+      : "";
+  const summary =
+    !stageSummary && event.summary
+      ? `<div class="activity-summary">${escapeHtml(JSON.stringify(event.summary))}</div>`
+      : "";
   const details = [
     renderDetailBlock("Tool Source", event.source),
     renderDetailBlock("Tool Family", event.toolFamily),
     renderDetailBlock("Tool Phase", event.phase),
     renderDetailBlock("Prompt", event.prompt),
     renderDetailBlock("Response", event.response),
+    renderDetailBlock("Stage Summary JSON", event.stage_summary ? safeStringify(event.stage_summary) : null),
     renderDetailBlock("Tool Arguments", event.arguments),
     renderDetailBlock("Tool Output", event.output),
     renderDetailBlock("Raw LLM Run Item", event.rawItem),
@@ -178,6 +186,7 @@ function addActivity(eventData) {
   item.innerHTML = `
     <div class="activity-time">${escapeHtml(time)} • ${escapeHtml(event.stage || "general")}</div>
     <div>${escapeHtml(title)}</div>
+    ${stageSummary}
     ${summary}
     ${details}
   `;
@@ -195,6 +204,40 @@ function addActivity(eventData) {
   if (TOOL_MONITOR_TYPES.has(eventType)) {
     addToolMonitorItem(event);
   }
+}
+
+function renderStageSummaryCard(stage, summary) {
+  if (!summary || typeof summary !== "object") return "";
+
+  const label = `${toTitleCase(stage || "Stage")} summary`;
+  const rows = Object.entries(summary)
+    .map(([key, value]) => {
+      const printable = Array.isArray(value) ? value.join(", ") : String(value);
+      return `<li><strong>${escapeHtml(humanizeKey(key))}:</strong> ${escapeHtml(printable)}</li>`;
+    })
+    .join("");
+
+  if (!rows) return "";
+
+  return `
+    <div class="activity-summary">
+      <div><strong>${escapeHtml(label)}</strong></div>
+      <ul class="list">${rows}</ul>
+    </div>
+  `;
+}
+
+function humanizeKey(value) {
+  return String(value || "")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .toLowerCase();
+}
+
+function toTitleCase(value) {
+  return String(value || "")
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 function updateStageProgress(event) {
