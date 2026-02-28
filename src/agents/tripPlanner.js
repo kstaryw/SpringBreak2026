@@ -1,4 +1,4 @@
-import { Agent, run, Runner, tool, webSearchTool } from "@openai/agents";
+import { Agent, Runner, tool, webSearchTool } from "@openai/agents";
 import { z } from "zod";
 import {
   attachStandardToolMonitoring,
@@ -423,7 +423,9 @@ export async function buildItineraryDraft(preferences, options = {}) {
   return normalized;
 }
 
-export async function createFinalReview(preferences, itinerary, confirmations) {
+export async function createFinalReview(preferences, itinerary, confirmations, options = {}) {
+  const emit = typeof options.onEvent === "function" ? options.onEvent : () => {};
+
   const selectedComponents = Object.fromEntries(
     TRIP_COMPONENTS.map((componentType) => {
       const confirmedOptionId = confirmations[componentType]?.optionId;
@@ -441,8 +443,36 @@ export async function createFinalReview(preferences, itinerary, confirmations) {
     "Return final confirmation prompt and reminder that nothing is purchased."
   ].join("\n");
 
-  const reviewResult = await run(finalReviewAgent, finalReviewInput);
-  return parseAgentJson(extractAgentText(reviewResult), "finalReviewAgent");
+  emit({
+    type: EventTypes.STAGE_STARTED,
+    stage: StageNames.FINAL,
+    agent: "FinalReviewAgent",
+    message: "Preparing final review and confirmation prompt."
+  });
+
+  const reviewResult = await runAgentWithTelemetry({
+    agent: finalReviewAgent,
+    agentName: "FinalReviewAgent",
+    stage: StageNames.FINAL,
+    input: finalReviewInput,
+    emit
+  });
+
+  const parsed = parseAgentJson(extractAgentText(reviewResult), "finalReviewAgent");
+
+  emit({
+    type: EventTypes.STAGE_COMPLETED,
+    stage: StageNames.FINAL,
+    agent: "FinalReviewAgent",
+    message: "Final review is ready.",
+    stage_summary: {
+      hasFinalSummary: Boolean(parsed?.finalSummary),
+      hasFinalConfirmationQuestion: Boolean(parsed?.finalConfirmationQuestion),
+      purchaseReminder: parsed?.purchaseReminder ?? null
+    }
+  });
+
+  return parsed;
 }
 
 function normalizeItinerary(rawItinerary, researchJson, safetyJson, preferences) {

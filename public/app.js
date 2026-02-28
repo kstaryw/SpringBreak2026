@@ -628,6 +628,10 @@ function attachConfirmHandlers(itineraryId) {
           throw new Error(apiErrorMessage(data, "Failed to confirm component"));
         }
 
+        if (Array.isArray(data.activityEvents) && data.activityEvents.length > 0) {
+          data.activityEvents.forEach((event) => addActivity(event));
+        }
+
         if (data.itinerary) {
           currentPlan = {
             ...currentPlan,

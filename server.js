@@ -163,9 +163,16 @@ app.post("/api/confirm-component", async (req, res) => {
     record.finalReview = null;
   }
 
+  const activityEvents = [];
   const remainingComponent = nextComponentToConfirm(record.confirmations);
   if (!remainingComponent) {
-    record.finalReview = await createFinalReview(record.preferences, record.itinerary, record.confirmations);
+    record.finalReview = await createFinalReview(record.preferences, record.itinerary, record.confirmations, {
+      onEvent: (event) =>
+        activityEvents.push({
+          ts: new Date().toISOString(),
+          ...event
+        })
+    });
   }
 
   res.json({
@@ -173,7 +180,8 @@ app.post("/api/confirm-component", async (req, res) => {
     itinerary: record.itinerary,
     confirmations: record.confirmations,
     nextComponentToConfirm: remainingComponent,
-    finalReview: record.finalReview ?? null
+    finalReview: record.finalReview ?? null,
+    activityEvents
   });
 });
 
