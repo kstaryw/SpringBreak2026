@@ -755,6 +755,8 @@ async function runAgentWithTelemetry({ agent, agentName, stage, input, emit }) {
     stage,
     fallbackAgentName: agentName
   });
+  let streamedToolCallCount = 0;
+  const pendingToolNamesByCallId = new Map();
 
   const streamedResult = await runner.run(agent, input, { stream: true });
 
@@ -790,10 +792,112 @@ async function runAgentWithTelemetry({ agent, agentName, stage, input, emit }) {
     });
 
     if (event.name === "tool_called" || isToolCallRawItem(rawItem)) {
+      const isHostedTool = rawItem?.type === "hosted_tool_call";
+      if (!isHostedTool) {
+        continue;
+      }
+
+      const callId = extractToolCallId(rawItem);
+      const startedToolName = extractToolName(rawItem) ?? "unknown_tool";
+      const toolFamily = inferToolFamily(startedToolName);
+      const source = "built-in";
+      const isWebSearch = toolFamily === "web_search";
+
+      if (callId) {
+        pendingToolNamesByCallId.set(callId, startedToolName);
+      }
+
+      emit({
+        type: EventTypes.TOOL_CALL_STARTED,
+        phase: "start",
+        stage,
+        agent: agentName,
+        toolName: startedToolName,
+        toolFamily,
+        monitorLabel: null,
+        source,
+        isWebSearch,
+        message: `Tool called: ${startedToolName}`,
+        arguments: extractToolArguments(rawItem),
+        output: null,
+        rawItem: normalizeDetailValue(rawItem)
+      });
+
+      if (isWebSearch) {
+        emit({
+          type: EventTypes.WEB_SEARCH_CALLED,
+          phase: "start",
+          stage,
+          agent: agentName,
+          toolName: startedToolName,
+          toolFamily,
+          monitorLabel: null,
+          source,
+          isWebSearch: true,
+          message: "Web search tool called (stream-derived).",
+          arguments: extractToolArguments(rawItem),
+          output: null,
+          rawItem: normalizeDetailValue(rawItem)
+        });
+      }
+
+      streamedToolCallCount += 1;
       continue;
     }
 
     if (event.name === "tool_output" || isToolOutputRawItem(rawItem)) {
+      const isHostedTool = rawItem?.type === "hosted_tool_call";
+      if (!isHostedTool) {
+        continue;
+      }
+
+      const callId = extractToolCallId(rawItem);
+      const completedToolName =
+        extractToolName(rawItem) ??
+        (callId ? pendingToolNamesByCallId.get(callId) : null) ??
+        "unknown_tool";
+      const toolFamily = inferToolFamily(completedToolName);
+      const source = "built-in";
+      const isWebSearch = toolFamily === "web_search";
+
+      emit({
+        type: EventTypes.TOOL_CALL_COMPLETED,
+        phase: "end",
+        stage,
+        agent: agentName,
+        toolName: completedToolName,
+        toolFamily,
+        monitorLabel: null,
+        source,
+        isWebSearch,
+        message: `Tool output received: ${completedToolName}`,
+        arguments: extractToolArguments(rawItem),
+        output: extractToolOutput(rawItem),
+        rawItem: normalizeDetailValue(rawItem)
+      });
+
+      if (isWebSearch) {
+        emit({
+          type: EventTypes.WEB_SEARCH_OUTPUT,
+          phase: "end",
+          stage,
+          agent: agentName,
+          toolName: completedToolName,
+          toolFamily,
+          monitorLabel: null,
+          source,
+          isWebSearch: true,
+          message: "Web search tool output received (stream-derived).",
+          arguments: extractToolArguments(rawItem),
+          output: extractToolOutput(rawItem),
+          rawItem: normalizeDetailValue(rawItem)
+        });
+      }
+
+      if (callId) {
+        pendingToolNamesByCallId.delete(callId);
+      }
+
       continue;
     }
   }
@@ -805,7 +909,7 @@ async function runAgentWithTelemetry({ agent, agentName, stage, input, emit }) {
 
   const responseText = extractAgentText(streamedResult);
 
-  if (monitor.getCallCount() === 0) {
+  if (monitor.getCallCount() + streamedToolCallCount === 0) {
     emit({
       type: "tool_notice",
       stage,
@@ -830,7 +934,24 @@ async function runAgentWithTelemetry({ agent, agentName, stage, input, emit }) {
 
 function extractToolName(rawItem) {
   if (!rawItem || typeof rawItem !== "object") return null;
-  return rawItem.name ?? rawItem.type ?? null;
+  return rawItem.name ?? rawItem.tool_name ?? rawItem.type ?? null;
+}
+
+function extractToolCallId(rawItem) {
+  if (!rawItem || typeof rawItem !== "object") return null;
+  return rawItem.call_id ?? rawItem.tool_call_id ?? rawItem.id ?? null;
+}
+
+function inferToolFamily(toolName) {
+  if (!toolName) return null;
+  const normalized = String(toolName).toLowerCase();
+  if (normalized.includes("web_search") || normalized.includes("websearch")) {
+    return "web_search";
+  }
+  if (normalized.includes("budget")) {
+    return "budget_calculator";
+  }
+  return null;
 }
 
 function extractToolArguments(rawItem) {
