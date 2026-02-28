@@ -101,6 +101,10 @@ async function streamPlan(payload) {
         finalResult = event.data;
       }
 
+      if (event.name === "done") {
+        updateStageProgress({ type: "stage_completed", stage: "done" });
+      }
+
       if (event.name === "error") {
         throw new Error(apiErrorMessage(event.data, "Failed to generate itinerary"));
       }
@@ -276,14 +280,23 @@ function renderProgressStepper() {
     const isCompleted = stageState.completed.has(stage);
     const isActive = stageState.active === stage && !isCompleted;
     const indicator = isCompleted ? "✅" : isActive ? "⏳" : "⬜";
-    const classes = ["progress-step"];
+    const classes = ["timeline-step"];
     if (isCompleted) classes.push("is-complete");
     if (isActive) classes.push("is-active");
+    const connectorClass = isCompleted ? "timeline-connector is-complete" : "timeline-connector";
+    const label = toTitleCase(stage);
+    const connector = stage === STAGE_FLOW[STAGE_FLOW.length - 1] ? "" : `<span class="${connectorClass}"></span>`;
 
-    return `<span class="${classes.join(" ")}">${indicator} ${escapeHtml(stage)}</span>`;
+    return `
+      <div class="${classes.join(" ")}">
+        <span class="timeline-badge">${indicator}</span>
+        <span class="timeline-label">${escapeHtml(label)}</span>
+        ${connector}
+      </div>
+    `;
   }).join("");
 
-  progressSection.innerHTML = html;
+  progressSection.innerHTML = `<div class="timeline-steps">${html}</div>`;
 }
 
 function ensureActivityGroup(agentName) {
@@ -609,6 +622,7 @@ function maybeRenderFinalAction(planData) {
     <p><strong>${escapeHtml(planData.finalReview.finalConfirmationQuestion || "Confirm final itinerary?")}</strong></p>
     <p class="muted">${escapeHtml(planData.finalReview.purchaseReminder || "No purchases are made")}</p>
     <button id="final-approve">Approve Final Itinerary</button>
+    <div id="final-itinerary-output"></div>
   `;
 
   const approveButton = document.getElementById("final-approve");
@@ -628,6 +642,11 @@ function maybeRenderFinalAction(planData) {
       }
 
       approveButton.textContent = "Final Itinerary Approved";
+      currentPlan = {
+        ...currentPlan,
+        finalConfirmed: true
+      };
+      renderFinalItineraryOutput(currentPlan, data);
       setMessage(data.message);
       setItineraryStatus(data.message);
     } catch (error) {
@@ -636,6 +655,59 @@ function maybeRenderFinalAction(planData) {
       setItineraryStatus(error.message || "Unexpected final confirmation error", true);
     }
   });
+}
+
+function renderFinalItineraryOutput(planData, finalConfirmationResponse = {}) {
+  const root = document.getElementById("final-itinerary-output");
+  if (!root || !planData?.itinerary) return;
+
+  const itinerary = planData.itinerary;
+  const confirmations = planData.confirmations || {};
+
+  const selectedFlight = findSelectedOption(itinerary.components?.flight, confirmations.flight?.optionId);
+  const selectedHotel = findSelectedOption(itinerary.components?.hotel, confirmations.hotel?.optionId);
+  const selectedCar = findSelectedOption(itinerary.components?.carRental, confirmations.carRental?.optionId);
+
+  root.innerHTML = `
+    <section class="final-itinerary-card">
+      <h4>Final Itinerary</h4>
+      <p class="muted">Planning complete. No purchases were made.</p>
+
+      <div class="final-item">
+        <strong>Flight:</strong>
+        <div>${escapeHtml(selectedFlight?.label || "Not selected")}</div>
+        <div class="muted">${escapeHtml(formatUsd(selectedFlight?.costUsd) || "-")}</div>
+      </div>
+
+      <div class="final-item">
+        <strong>Hotel:</strong>
+        <div>${escapeHtml(selectedHotel?.label || "Not selected")}</div>
+        <div class="muted">${escapeHtml(formatUsd(selectedHotel?.costUsd) || "-")}</div>
+      </div>
+
+      <div class="final-item">
+        <strong>Car Rental:</strong>
+        <div>${escapeHtml(selectedCar?.label || "Not selected")}</div>
+        <div class="muted">${escapeHtml(formatUsd(selectedCar?.costUsd) || "$0")}</div>
+      </div>
+
+      <div class="final-item">
+        <strong>Total Estimated Cost:</strong>
+        <div>${escapeHtml(formatUsd(itinerary.estimatedCostSummary?.totalUsd) || "$0")}</div>
+      </div>
+
+      <div class="final-item">
+        <strong>Purchase Policy:</strong>
+        <div class="muted">${escapeHtml(finalConfirmationResponse.noPurchasePolicy || "This app does not proceed with purchases.")}</div>
+      </div>
+    </section>
+  `;
+}
+
+function findSelectedOption(component, confirmedOptionId) {
+  if (!component?.options?.length) return null;
+  const selectedId = confirmedOptionId || component.recommendedOptionId || component.options[0]?.id;
+  return component.options.find((item) => item.id === selectedId) || component.options[0] || null;
 }
 
 function renderSimpleList(items) {

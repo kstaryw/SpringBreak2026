@@ -150,6 +150,18 @@ button:disabled {
   font-weight: 700;
 }
 
+.final-itinerary-card {
+  margin-top: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 12px;
+  background: #f9fafb;
+}
+
+.final-item {
+  margin-top: 10px;
+}
+
 .muted {
   color: #6b7280;
   font-size: 14px;
@@ -175,31 +187,71 @@ button:disabled {
 }
 
 .progress-stepper {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
+  overflow-x: auto;
   margin: 0 0 12px;
 }
 
-.progress-step {
-  border: 1px solid #e5e7eb;
+.timeline-steps {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  min-width: 760px;
+}
+
+.timeline-step {
+  display: inline-flex;
+  align-items: center;
+  min-width: 140px;
+}
+
+.timeline-badge {
+  width: 22px;
+  height: 22px;
   border-radius: 999px;
-  padding: 4px 10px;
+  border: 1px solid #d1d5db;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  margin-right: 8px;
+  font-size: 12px;
+}
+
+.timeline-label {
   font-size: 13px;
   color: #374151;
-  background: #f9fafb;
+  white-space: nowrap;
 }
 
-.progress-step.is-active {
+.timeline-connector {
+  height: 2px;
+  flex: 1;
+  margin: 0 10px;
+  background: #d1d5db;
+}
+
+.timeline-step.is-active .timeline-badge {
   border-color: #9ca3af;
-  background: #ffffff;
-  color: #111827;
+  box-shadow: 0 0 0 2px #f3f4f6;
 }
 
-.progress-step.is-complete {
+.timeline-step.is-active .timeline-label {
+  color: #111827;
+  font-weight: 600;
+}
+
+.timeline-step.is-complete .timeline-badge {
   border-color: #86efac;
   background: #f0fdf4;
+}
+
+.timeline-step.is-complete .timeline-label {
   color: #166534;
+  font-weight: 600;
+}
+
+.timeline-connector.is-complete {
+  background: #86efac;
 }
 
 .agent-group {
