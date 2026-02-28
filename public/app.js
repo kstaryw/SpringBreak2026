@@ -27,6 +27,10 @@ const activityGroupMeta = new Map();
 let activeAgentKey = null;
 let activeAgentStartTime = null;
 let activeAgentTimer = null;
+let itineraryMap = null;
+let itineraryMapLayer = null;
+let mapRenderToken = 0;
+const geocodeCache = new Map();
 const toolSummaryGroups = new Map();
 const STAGE_FLOW = ["initialization", "research", "safety", "composition", "done"];
 const STAGE_LABELS = {
@@ -605,12 +609,15 @@ function renderItinerary(planData) {
     <p class="muted">${escapeHtml(itinerary.disclaimer || "")}</p>
     <div id="itinerary-status" class="muted"></div>
     <div id="components"></div>
+    <h3>Map (Hotels & Activities)</h3>
+    <p id="itinerary-map-status" class="muted">Loading map locations...</p>
+    <div id="itinerary-map" class="itinerary-map"></div>
     <h3>Activities</h3>
     ${renderActivityList(itinerary.activities || [])}
     <h3>Safety Concerns</h3>
-    ${renderSimpleList(itinerary.safetyConcerns || [])}
+    ${renderSimpleList(itinerary.safetyConcerns || [], { collapseReferences: true })}
     <h3>Packing List</h3>
-    ${renderSimpleList(itinerary.packingList || [])}
+    ${renderSimpleList(itinerary.packingList || [], { collapseReferences: true })}
     <h3>Estimated Cost Summary (USD)</h3>
     ${renderCostSummary(itinerary.estimatedCostSummary || {})}
     <div id="final-review"></div>
@@ -679,6 +686,7 @@ function renderItinerary(planData) {
     componentsRoot.appendChild(block);
   });
 
+  renderItineraryMap(planData);
   attachConfirmHandlers(planData.itineraryId);
   maybeRenderFinalAction(planData);
 }
@@ -853,9 +861,273 @@ function findSelectedOption(component, confirmedOptionId) {
   return component.options.find((item) => item.id === selectedId) || component.options[0] || null;
 }
 
-function renderSimpleList(items) {
+function renderSimpleList(items, options = {}) {
+  const collapseReferences = options.collapseReferences === true;
   if (!items.length) return "<p class=\"muted\">No items.</p>";
-  return `<ul class=\"list\">${items.map((item) => `<li>${escapeHtml(String(item))}</li>`).join("")}</ul>`;
+
+  const rows = items
+    .map((item) => {
+      if (!collapseReferences) {
+        return `<li>${escapeHtml(String(item))}</li>`;
+      }
+
+      const parsed = splitContentAndReferences(item);
+      const linksHtml = parsed.links.length
+        ? `
+          <details class="reference-links">
+            <summary>Show references (${parsed.links.length})</summary>
+            <ul class="list reference-links-list">
+              ${parsed.links
+                .map((link) => `<li><a href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer">${escapeHtml(link)}</a></li>`)
+                .join("")}
+            </ul>
+          </details>
+        `
+        : "";
+
+      return `<li>${escapeHtml(parsed.text)}${linksHtml}</li>`;
+    })
+    .join("");
+
+  return `<ul class=\"list\">${rows}</ul>`;
+}
+
+function splitContentAndReferences(item) {
+  const urlRegex = /https?:\/\/[^\s)\]}>,]+/g;
+  const extractedLinks = [];
+
+  const pushLink = (value) => {
+    if (!value) return;
+    const asString = String(value).trim();
+    if (!asString) return;
+    if (!/^https?:\/\//i.test(asString)) return;
+    if (!extractedLinks.includes(asString)) extractedLinks.push(asString);
+  };
+
+  if (typeof item === "string") {
+    const found = item.match(urlRegex) || [];
+    found.forEach(pushLink);
+    const text = item.replace(urlRegex, "").replace(/\s{2,}/g, " ").trim();
+    return {
+      text: text || item,
+      links: extractedLinks
+    };
+  }
+
+  if (item && typeof item === "object") {
+    const linkFields = [
+      "references",
+      "referenceLinks",
+      "sourceLinks",
+      "sources",
+      "links",
+      "urls",
+      "source",
+      "reference",
+      "url"
+    ];
+
+    linkFields.forEach((field) => {
+      const value = item[field];
+      if (Array.isArray(value)) {
+        value.forEach(pushLink);
+      } else {
+        pushLink(value);
+      }
+    });
+
+    const text =
+      item.concern ||
+      item.item ||
+      item.name ||
+      item.description ||
+      item.text ||
+      JSON.stringify(item);
+
+    const inferredFromText = String(text).match(urlRegex) || [];
+    inferredFromText.forEach(pushLink);
+
+    return {
+      text: String(text).replace(urlRegex, "").replace(/\s{2,}/g, " ").trim() || String(text),
+      links: extractedLinks
+    };
+  }
+
+  const fallback = String(item);
+  const found = fallback.match(urlRegex) || [];
+  found.forEach(pushLink);
+  return {
+    text: fallback.replace(urlRegex, "").replace(/\s{2,}/g, " ").trim() || fallback,
+    links: extractedLinks
+  };
+}
+
+async function renderItineraryMap(planData) {
+  const mapElement = document.getElementById("itinerary-map");
+  const statusElement = document.getElementById("itinerary-map-status");
+  if (!mapElement || !statusElement) return;
+
+  if (!window.L) {
+    statusElement.textContent = "Map is unavailable (leaflet library not loaded).";
+    return;
+  }
+
+  const token = ++mapRenderToken;
+  const destination = String(form?.querySelector('input[name="destinationCity"]')?.value || "").trim();
+  const places = buildMapPlaces(planData, destination).slice(0, 16);
+
+  if (places.length === 0) {
+    mapElement.classList.add("hidden");
+    statusElement.textContent = "No mappable hotel/activity locations available.";
+    return;
+  }
+
+  mapElement.classList.remove("hidden");
+  statusElement.textContent = "Resolving hotel and activity locations...";
+  const map = ensureItineraryMap(mapElement);
+  itineraryMapLayer.clearLayers();
+
+  const points = [];
+  for (const place of places) {
+    const point = await geocodePlace(place.query);
+    if (!point || token !== mapRenderToken) continue;
+    points.push({ ...place, ...point });
+  }
+
+  if (token !== mapRenderToken) return;
+
+  if (points.length === 0) {
+    statusElement.textContent = "Could not resolve map coordinates for these hotels/activities.";
+    return;
+  }
+
+  points.forEach((point) => {
+    const color = point.type === "hotel" ? "#2563eb" : "#059669";
+    const marker = window.L.circleMarker([point.lat, point.lon], {
+      radius: 8,
+      color,
+      fillColor: color,
+      fillOpacity: 0.75,
+      weight: 2
+    });
+
+    marker.bindPopup(`
+      <div>
+        <strong>${escapeHtml(point.type === "hotel" ? "Hotel" : "Activity")}</strong><br/>
+        ${escapeHtml(point.label)}
+      </div>
+    `);
+    itineraryMapLayer.addLayer(marker);
+  });
+
+  const bounds = window.L.latLngBounds(points.map((point) => [point.lat, point.lon]));
+  if (bounds.isValid()) {
+    map.fitBounds(bounds.pad(0.2));
+  }
+
+  statusElement.textContent = `Showing ${points.length} mapped location${points.length === 1 ? "" : "s"}.`;
+}
+
+function buildMapPlaces(planData, destination) {
+  const itinerary = planData?.itinerary || {};
+  const hotelOptions = itinerary?.components?.hotel?.options || [];
+  const activities = itinerary?.activities || [];
+  const seen = new Set();
+  const places = [];
+
+  const addPlace = (type, label) => {
+    const cleanLabel = String(label || "").trim();
+    if (!cleanLabel) return;
+    const withDestination = destination && !cleanLabel.toLowerCase().includes(destination.toLowerCase())
+      ? `${cleanLabel}, ${destination}`
+      : cleanLabel;
+    const dedupeKey = `${type}:${withDestination.toLowerCase()}`;
+    if (seen.has(dedupeKey)) return;
+    seen.add(dedupeKey);
+    places.push({ type, label: cleanLabel, query: withDestination });
+  };
+
+  hotelOptions.forEach((option) => {
+    addPlace("hotel", option.label || option.name || option.id);
+  });
+
+  activities.forEach((activity) => {
+    if (typeof activity === "string") {
+      addPlace("activity", activity);
+      return;
+    }
+    addPlace("activity", activity?.name || activity?.location || activity?.title);
+  });
+
+  return places;
+}
+
+function ensureItineraryMap(mapElement) {
+  if (!itineraryMap || itineraryMap.getContainer() !== mapElement) {
+    if (itineraryMap) {
+      itineraryMap.remove();
+      itineraryMap = null;
+      itineraryMapLayer = null;
+    }
+
+    itineraryMap = window.L.map(mapElement, {
+      zoomControl: true
+    }).setView([48.8566, 2.3522], 12);
+
+    window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    }).addTo(itineraryMap);
+
+    itineraryMapLayer = window.L.layerGroup().addTo(itineraryMap);
+  }
+
+  setTimeout(() => {
+    itineraryMap?.invalidateSize();
+  }, 0);
+
+  return itineraryMap;
+}
+
+async function geocodePlace(query) {
+  const key = String(query || "").trim().toLowerCase();
+  if (!key) return null;
+  if (geocodeCache.has(key)) return geocodeCache.get(key);
+
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(query)}`;
+    const response = await fetch(url, {
+      headers: {
+        Accept: "application/json"
+      }
+    });
+    if (!response.ok) {
+      geocodeCache.set(key, null);
+      return null;
+    }
+
+    const payload = await response.json();
+    const first = Array.isArray(payload) ? payload[0] : null;
+    if (!first?.lat || !first?.lon) {
+      geocodeCache.set(key, null);
+      return null;
+    }
+
+    const point = {
+      lat: Number(first.lat),
+      lon: Number(first.lon)
+    };
+    if (Number.isNaN(point.lat) || Number.isNaN(point.lon)) {
+      geocodeCache.set(key, null);
+      return null;
+    }
+
+    geocodeCache.set(key, point);
+    return point;
+  } catch {
+    geocodeCache.set(key, null);
+    return null;
+  }
 }
 
 function renderCostSummary(costs) {
