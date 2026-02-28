@@ -17,6 +17,7 @@ const TOOL_MONITOR_TYPES = new Set([
 
 let currentPlan = null;
 const activityGroups = new Map();
+const activityGroupMeta = new Map();
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -131,6 +132,7 @@ function resetTimeline() {
   activitySection.classList.remove("hidden");
   activityList.innerHTML = "";
   activityGroups.clear();
+  activityGroupMeta.clear();
   toolMonitorSection.classList.remove("hidden");
   toolMonitorList.innerHTML = "";
 }
@@ -168,10 +170,15 @@ function addActivity(eventData) {
     ${details}
   `;
 
-  const group = ensureActivityGroup(event.agent || "System");
-  group.itemsList.appendChild(item);
-  group.count += 1;
-  group.countNode.textContent = `${group.count}`;
+  const groupKey = event.agent || "System";
+  const groupUL = ensureActivityGroup(groupKey);
+  groupUL.appendChild(item);
+
+  const meta = activityGroupMeta.get(groupKey);
+  if (meta) {
+    meta.count += 1;
+    meta.countNode.textContent = `${meta.count}`;
+  }
 
   if (TOOL_MONITOR_TYPES.has(eventType)) {
     addToolMonitorItem(event);
@@ -188,7 +195,7 @@ function ensureActivityGroup(agentName) {
   groupItem.className = "agent-group";
 
   const details = document.createElement("details");
-  details.open = true;
+  details.open = false;
 
   const summary = document.createElement("summary");
   summary.className = "agent-group-summary";
@@ -212,14 +219,13 @@ function ensureActivityGroup(agentName) {
   groupItem.appendChild(details);
   activityList.appendChild(groupItem);
 
-  const group = {
-    itemsList,
+  activityGroups.set(key, itemsList);
+  activityGroupMeta.set(key, {
     countNode: count,
     count: 0
-  };
+  });
 
-  activityGroups.set(key, group);
-  return group;
+  return itemsList;
 }
 
 function addToolMonitorItem(event) {
