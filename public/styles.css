@@ -77,6 +77,57 @@ button:disabled {
   display: none;
 }
 
+/* Confirmed component collapsed disclosure */
+.confirmed-component {
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+.confirmed-component-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  list-style: none;
+  padding: 0.35rem 0;
+  font-size: 0.95rem;
+  user-select: none;
+}
+.confirmed-component-summary::-webkit-details-marker { display: none; }
+.confirmed-component-summary::before {
+  content: "▶";
+  font-size: 0.65rem;
+  color: #888;
+  transition: transform 0.15s;
+  flex-shrink: 0;
+}
+.confirmed-component[open] > .confirmed-component-summary::before {
+  transform: rotate(90deg);
+}
+.confirmed-badge {
+  background: #d1fae5;
+  color: #065f46;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.confirmed-component-title {
+  font-weight: 600;
+  text-transform: capitalize;
+}
+.confirmed-component-label {
+  color: #555;
+  font-size: 0.88rem;
+}
+.confirmed-component-body {
+  padding: 0.5rem 0 0.25rem 1.4rem;
+  border-left: 2px solid #d1fae5;
+  margin-left: 0.25rem;
+}
+
 .component-options {
   display: grid;
   gap: 8px;
@@ -311,6 +362,47 @@ button:disabled {
   border: 1px solid #d1d5db;
   border-radius: 999px;
   padding: 1px 6px;
+  margin-left: auto;
+}
+
+/* Live-running badge */
+.agent-live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  background: #fef3c7;
+  color: #92400e;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  white-space: nowrap;
+  margin-left: 0.5rem;
+  border: 1px solid #fcd34d;
+}
+
+.agent-live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #f59e0b;
+  flex-shrink: 0;
+  animation: live-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.45; transform: scale(0.65); }
+}
+
+.agent-live-label {
+  letter-spacing: 0.02em;
+}
+
+.agent-live-elapsed {
+  font-variant-numeric: tabular-nums;
+  min-width: 2ch;
+  display: inline-block;
 }
 
 .agent-group-items {

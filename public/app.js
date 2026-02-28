@@ -24,6 +24,9 @@ const TOOL_MONITOR_TYPES = new Set([
 let currentPlan = null;
 const activityGroups = new Map();
 const activityGroupMeta = new Map();
+let activeAgentKey = null;
+let activeAgentStartTime = null;
+let activeAgentTimer = null;
 const toolSummaryGroups = new Map();
 const STAGE_FLOW = ["initialization", "research", "safety", "composition", "done"];
 const STAGE_LABELS = {
@@ -160,11 +163,49 @@ function parseSseChunk(chunk) {
   return { name, data };
 }
 
+// ── Live-agent badge helpers ─────────────────────────────────────
+function setActiveAgentBadge(agentKey) {
+  clearActiveAgentBadge();
+  activeAgentKey = agentKey;
+  activeAgentStartTime = Date.now();
+  // If the group already exists, show badge immediately
+  _activateBadgeNode(agentKey);
+  // Tick every second to update elapsed time
+  activeAgentTimer = setInterval(() => {
+    if (!activeAgentKey || !activeAgentStartTime) return;
+    const meta = activityGroupMeta.get(activeAgentKey);
+    if (!meta?.liveElapsed) return;
+    const secs = Math.floor((Date.now() - activeAgentStartTime) / 1000);
+    meta.liveElapsed.textContent = secs >= 60
+      ? `${Math.floor(secs / 60)}m ${secs % 60}s`
+      : `${secs}s`;
+  }, 1000);
+}
+
+function clearActiveAgentBadge() {
+  if (activeAgentTimer) { clearInterval(activeAgentTimer); activeAgentTimer = null; }
+  if (activeAgentKey) {
+    const meta = activityGroupMeta.get(activeAgentKey);
+    if (meta?.liveBadge) meta.liveBadge.hidden = true;
+  }
+  activeAgentKey = null;
+  activeAgentStartTime = null;
+}
+
+function _activateBadgeNode(agentKey) {
+  const meta = activityGroupMeta.get(agentKey);
+  if (!meta?.liveBadge) return;
+  meta.liveBadge.hidden = false;
+  meta.liveElapsed.textContent = "0s";
+}
+// ─────────────────────────────────────────────────────────────────
+
 function resetTimeline() {
   activitySection.classList.remove("hidden");
   activityList.innerHTML = "";
   activityGroups.clear();
   activityGroupMeta.clear();
+  clearActiveAgentBadge();
   toolSummaryGroups.clear();
   stageSummariesByStage.clear();
   if (stageSummariesList) stageSummariesList.innerHTML = "";
@@ -316,10 +357,12 @@ function updateStageProgress(event) {
 
   if (event.type === "stage_started") {
     stageState.active = event.stage;
+    if (event.agent) setActiveAgentBadge(String(event.agent));
   }
 
   if (event.type === "stage_completed") {
     stageState.completed.add(event.stage);
+    clearActiveAgentBadge();
     if (event.stage === "composition" || event.stage === "final") {
       stageState.completed.add("done");
       stageState.active = null;
@@ -378,7 +421,18 @@ function ensureActivityGroup(agentName) {
   count.className = "agent-group-count";
   count.textContent = "0";
 
+  // Live-running badge (hidden by default)
+  const liveBadge = document.createElement("span");
+  liveBadge.className = "agent-live-badge";
+  liveBadge.hidden = true;
+  liveBadge.innerHTML =
+    `<span class="agent-live-dot"></span>` +
+    `<span class="agent-live-label">running</span>` +
+    `\u00a0<span class="agent-live-elapsed">0s</span>`;
+  const liveElapsed = liveBadge.querySelector(".agent-live-elapsed");
+
   summary.appendChild(title);
+  summary.appendChild(liveBadge);
   summary.appendChild(count);
 
   const itemsList = document.createElement("ul");
@@ -392,8 +446,13 @@ function ensureActivityGroup(agentName) {
   activityGroups.set(key, itemsList);
   activityGroupMeta.set(key, {
     countNode: count,
+    liveBadge,
+    liveElapsed,
     count: 0
   });
+
+  // If this agent was already marked active before its group was created, show badge now
+  if (activeAgentKey === key) _activateBadgeNode(key);
 
   return itemsList;
 }
@@ -558,6 +617,7 @@ function renderItinerary(planData) {
   `;
 
   const componentsRoot = document.getElementById("components");
+  const confirmations = planData.confirmations || {};
   ["flight", "hotel", "carRental"].forEach((componentType) => {
     const component = itinerary.components?.[componentType];
     if (!component) return;
@@ -565,33 +625,56 @@ function renderItinerary(planData) {
     const block = document.createElement("section");
     block.className = "card";
 
-    const optionsHtml = (component.options || [])
-      .map(
-        (option) => `
-          <label class="option">
-            <div class="inline">
-              <input type="radio" name="${componentType}-option" value="${escapeHtml(option.id)}" ${
-          option.id === component.recommendedOptionId ? "checked" : ""
-        } />
-              <strong>${escapeHtml(option.label || option.id)}</strong>
-            </div>
-            ${renderOptionQuickFacts(componentType, option)}
-            <div class="muted">${escapeHtml(option.notes || "")}</div>
-            <details>
-              <summary>Show JSON</summary>
-              <pre>${escapeHtml(JSON.stringify(option, null, 2))}</pre>
-            </details>
-          </label>
-        `
-      )
-      .join("");
+    const isConfirmed = !!confirmations[componentType];
 
-    block.innerHTML = `
-      <h3>${escapeHtml(componentType)}</h3>
-      <p>${escapeHtml(component.confirmationQuestion || "Please confirm this option")}</p>
-      <div class="component-options">${optionsHtml}</div>
-      <button data-component="${componentType}" class="confirm-btn">Confirm ${escapeHtml(componentType)}</button>
-    `;
+    if (isConfirmed) {
+      const confirmedOptionId = confirmations[componentType].optionId;
+      const confirmedOption =
+        (component.options || []).find((o) => o.id === confirmedOptionId) ||
+        component.options?.[0];
+      const priceStr = confirmedOption?.costUsd ? ` — ${formatUsd(confirmedOption.costUsd)}` : "";
+      block.innerHTML = `
+        <details class="confirmed-component">
+          <summary class="confirmed-component-summary">
+            <span class="confirmed-badge">✓ Confirmed</span>
+            <span class="confirmed-component-title">${escapeHtml(componentType)}</span>
+            ${confirmedOption ? `<span class="confirmed-component-label">${escapeHtml(confirmedOption.label || confirmedOption.id)}${escapeHtml(priceStr)}</span>` : ""}
+          </summary>
+          <div class="confirmed-component-body">
+            ${confirmedOption ? renderOptionQuickFacts(componentType, confirmedOption) : ""}
+            ${confirmedOption?.notes ? `<div class="muted">${escapeHtml(confirmedOption.notes)}</div>` : ""}
+          </div>
+        </details>
+      `;
+    } else {
+      const optionsHtml = (component.options || [])
+        .map(
+          (option) => `
+            <label class="option">
+              <div class="inline">
+                <input type="radio" name="${componentType}-option" value="${escapeHtml(option.id)}" ${
+            option.id === component.recommendedOptionId ? "checked" : ""
+          } />
+                <strong>${escapeHtml(option.label || option.id)}</strong>
+              </div>
+              ${renderOptionQuickFacts(componentType, option)}
+              <div class="muted">${escapeHtml(option.notes || "")}</div>
+              <details>
+                <summary>Show JSON</summary>
+                <pre>${escapeHtml(JSON.stringify(option, null, 2))}</pre>
+              </details>
+            </label>
+          `
+        )
+        .join("");
+
+      block.innerHTML = `
+        <h3>${escapeHtml(componentType)}</h3>
+        <p>${escapeHtml(component.confirmationQuestion || "Please confirm this option")}</p>
+        <div class="component-options">${optionsHtml}</div>
+        <button data-component="${componentType}" class="confirm-btn">Confirm ${escapeHtml(componentType)}</button>
+      `;
+    }
 
     componentsRoot.appendChild(block);
   });
