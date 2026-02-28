@@ -613,6 +613,9 @@ function maybeRenderFinalAction(planData) {
 
   const approveButton = document.getElementById("final-approve");
   approveButton?.addEventListener("click", async () => {
+    approveButton.disabled = true;
+    setItineraryStatus("Submitting final approval...");
+
     try {
       const response = await fetch("/api/final-confirmation", {
         method: "POST",
@@ -623,9 +626,14 @@ function maybeRenderFinalAction(planData) {
       if (!response.ok) {
         throw new Error(apiErrorMessage(data, "Final confirmation failed"));
       }
+
+      approveButton.textContent = "Final Itinerary Approved";
       setMessage(data.message);
+      setItineraryStatus(data.message);
     } catch (error) {
+      approveButton.disabled = false;
       setMessage(error.message || "Unexpected final confirmation error", true);
+      setItineraryStatus(error.message || "Unexpected final confirmation error", true);
     }
   });
 }
