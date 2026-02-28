@@ -191,6 +191,31 @@ button:disabled {
   margin: 0 0 12px;
 }
 
+.stage-summaries {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f9fafb;
+  padding: 10px;
+  margin: 0 0 12px;
+}
+
+#stage-summaries-list {
+  display: grid;
+  gap: 8px;
+}
+
+.stage-summary-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px;
+}
+
+.stage-summary-card h4 {
+  margin: 0 0 6px;
+  color: #111827;
+}
+
 .timeline-steps {
   display: flex;
   align-items: center;

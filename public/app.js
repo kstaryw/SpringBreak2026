@@ -4,6 +4,8 @@ const messagesSection = document.getElementById("messages");
 const activitySection = document.getElementById("activity");
 const activityList = document.getElementById("activity-list");
 const progressSection = document.getElementById("progress");
+const stageSummariesSection = document.getElementById("stage-summaries");
+const stageSummariesList = document.getElementById("stage-summaries-list");
 const toolMonitorSection = document.getElementById("tool-monitor");
 const toolMonitorList = document.getElementById("tool-monitor-list");
 const startDateInput = form?.querySelector('input[name="startDate"]');
@@ -24,10 +26,18 @@ const activityGroups = new Map();
 const activityGroupMeta = new Map();
 const toolSummaryGroups = new Map();
 const STAGE_FLOW = ["initialization", "research", "safety", "composition", "done"];
+const STAGE_LABELS = {
+  initialization: "Initialization",
+  research: "Research",
+  safety: "Safety",
+  composition: "Composition",
+  done: "Done"
+};
 const stageState = {
   active: null,
   completed: new Set()
 };
+const stageSummariesByStage = new Map();
 
 if (tripLengthInput) {
   tripLengthInput.readOnly = true;
@@ -156,6 +166,9 @@ function resetTimeline() {
   activityGroups.clear();
   activityGroupMeta.clear();
   toolSummaryGroups.clear();
+  stageSummariesByStage.clear();
+  if (stageSummariesList) stageSummariesList.innerHTML = "";
+  if (stageSummariesSection) stageSummariesSection.classList.add("hidden");
   stageState.active = null;
   stageState.completed.clear();
   renderProgressStepper();
@@ -179,6 +192,9 @@ function addActivity(eventData) {
     eventType === "stage_completed" && event.stage_summary
       ? renderStageSummaryCard(event.stage, event.stage_summary)
       : "";
+  if (eventType === "stage_completed" && event.stage_summary) {
+    upsertStageSummary(event.stage, event.stage_summary);
+  }
   const summary =
     !stageSummary && event.summary
       ? `<div class="activity-summary">${escapeHtml(JSON.stringify(event.summary))}</div>`
@@ -242,6 +258,46 @@ function renderStageSummaryCard(stage, summary) {
   `;
 }
 
+function upsertStageSummary(stage, summary) {
+  if (!stage || !summary || typeof summary !== "object") return;
+  stageSummariesByStage.set(stage, summary);
+  renderStageSummariesPanel();
+}
+
+function renderStageSummariesPanel() {
+  if (!stageSummariesSection || !stageSummariesList) return;
+
+  if (stageSummariesByStage.size === 0) {
+    stageSummariesSection.classList.add("hidden");
+    stageSummariesList.innerHTML = "";
+    return;
+  }
+
+  stageSummariesSection.classList.remove("hidden");
+
+  const orderedStages = STAGE_FLOW.filter((stage) => stageSummariesByStage.has(stage));
+  const html = orderedStages
+    .map((stage) => {
+      const summary = stageSummariesByStage.get(stage);
+      const rows = Object.entries(summary)
+        .map(([key, value]) => {
+          const printable = Array.isArray(value) ? value.join(", ") : String(value);
+          return `<li><strong>${escapeHtml(humanizeKey(key))}:</strong> ${escapeHtml(printable)}</li>`;
+        })
+        .join("");
+
+      return `
+        <article class="stage-summary-card">
+          <h4>${escapeHtml((STAGE_LABELS[stage] || toTitleCase(stage)) + " Summary")}</h4>
+          <ul class="list">${rows}</ul>
+        </article>
+      `;
+    })
+    .join("");
+
+  stageSummariesList.innerHTML = html;
+}
+
 function humanizeKey(value) {
   return String(value || "")
     .replace(/([a-z])([A-Z])/g, "$1 $2")
@@ -284,7 +340,7 @@ function renderProgressStepper() {
     if (isCompleted) classes.push("is-complete");
     if (isActive) classes.push("is-active");
     const connectorClass = isCompleted ? "timeline-connector is-complete" : "timeline-connector";
-    const label = toTitleCase(stage);
+    const label = STAGE_LABELS[stage] || toTitleCase(stage);
     const connector = stage === STAGE_FLOW[STAGE_FLOW.length - 1] ? "" : `<span class="${connectorClass}"></span>`;
 
     return `
