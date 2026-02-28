@@ -6,6 +6,9 @@ const activityList = document.getElementById("activity-list");
 const progressSection = document.getElementById("progress");
 const toolMonitorSection = document.getElementById("tool-monitor");
 const toolMonitorList = document.getElementById("tool-monitor-list");
+const startDateInput = form?.querySelector('input[name="startDate"]');
+const endDateInput = form?.querySelector('input[name="endDate"]');
+const tripLengthInput = form?.querySelector('input[name="tripLengthDays"]');
 
 const TOOL_MONITOR_TYPES = new Set([
   "tool_call_started",
@@ -25,6 +28,14 @@ const stageState = {
   active: null,
   completed: new Set()
 };
+
+if (tripLengthInput) {
+  tripLengthInput.readOnly = true;
+}
+
+startDateInput?.addEventListener("change", syncTripLengthFromDates);
+endDateInput?.addEventListener("change", syncTripLengthFromDates);
+syncTripLengthFromDates();
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -643,4 +654,26 @@ async function safeJson(response) {
   } catch {
     return null;
   }
+}
+
+function syncTripLengthFromDates() {
+  if (!startDateInput || !endDateInput || !tripLengthInput) return;
+
+  const start = parseDateOnly(startDateInput.value);
+  const end = parseDateOnly(endDateInput.value);
+
+  if (!start || !end || end <= start) {
+    tripLengthInput.value = "1";
+    return;
+  }
+
+  const millisecondsPerDay = 24 * 60 * 60 * 1000;
+  const diffDays = Math.floor((end.getTime() - start.getTime()) / millisecondsPerDay);
+  tripLengthInput.value = String(Math.max(1, diffDays));
+}
+
+function parseDateOnly(value) {
+  if (!value) return null;
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
