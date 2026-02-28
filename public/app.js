@@ -12,6 +12,48 @@ const startDateInput = form?.querySelector('input[name="startDate"]');
 const endDateInput = form?.querySelector('input[name="endDate"]');
 const tripLengthInput = form?.querySelector('input[name="tripLengthDays"]');
 const ACTIVITY_CATEGORY_FIELDS = ["activityCategory1", "activityCategory2", "activityCategory3"];
+const CATEGORY_ACTIVITY_FALLBACKS = {
+  museums: [
+    { name: "Louvre Museum Visit", estimatedCostUsd: 25, scheduledDay: "Day 1", notes: "Explore world-renowned art collections and iconic galleries." },
+    { name: "Musée d'Orsay Highlights", estimatedCostUsd: 20, scheduledDay: "Day 2", notes: "See impressionist masterpieces in a historic station setting." },
+    { name: "Centre Pompidou Modern Art", estimatedCostUsd: 18, scheduledDay: "Day 3", notes: "Discover modern and contemporary collections with city views." }
+  ],
+  cafes: [
+    { name: "Café Culture Morning", estimatedCostUsd: 15, scheduledDay: "Day 1", notes: "Try classic pastries and coffee at neighborhood cafés." },
+    { name: "Saint-Germain Café Hop", estimatedCostUsd: 22, scheduledDay: "Day 2", notes: "Visit notable Left Bank cafés with local ambience." },
+    { name: "Canal-side Coffee Walk", estimatedCostUsd: 16, scheduledDay: "Day 3", notes: "Relaxed café stops paired with scenic neighborhood strolls." }
+  ],
+  "walking tours": [
+    { name: "Seine River Walking Tour", estimatedCostUsd: 25, scheduledDay: "Day 1", notes: "Guided route past major landmarks along the river." },
+    { name: "Montmartre Walking Tour", estimatedCostUsd: 24, scheduledDay: "Day 2", notes: "Explore hilltop streets, art history, and city viewpoints." },
+    { name: "Historic Center Walk", estimatedCostUsd: 20, scheduledDay: "Day 3", notes: "Orientation walk through old quarters and hidden passages." }
+  ],
+  "historical sites": [
+    { name: "Notre-Dame & Île de la Cité", estimatedCostUsd: 12, scheduledDay: "Day 1", notes: "Visit the historic core and surrounding landmarks." },
+    { name: "Palace and Gardens Visit", estimatedCostUsd: 28, scheduledDay: "Day 2", notes: "Guided historical context at a major royal site." },
+    { name: "Latin Quarter History Walk", estimatedCostUsd: 18, scheduledDay: "Day 3", notes: "Learn local history across medieval streets and squares." }
+  ],
+  "food tours": [
+    { name: "Local Market Tasting Tour", estimatedCostUsd: 35, scheduledDay: "Day 1", notes: "Sample regional specialties with a local guide." },
+    { name: "Neighborhood Bakery Trail", estimatedCostUsd: 22, scheduledDay: "Day 2", notes: "Taste breads, pastries, and desserts at top bakeries." },
+    { name: "Evening Food Walk", estimatedCostUsd: 38, scheduledDay: "Day 3", notes: "Try signature dishes across multiple local stops." }
+  ],
+  nightlife: [
+    { name: "Jazz Club Evening", estimatedCostUsd: 30, scheduledDay: "Day 1", notes: "Live music in a classic late-evening venue." },
+    { name: "Rooftop Night View", estimatedCostUsd: 26, scheduledDay: "Day 2", notes: "Panoramic night skyline from a central rooftop spot." },
+    { name: "Evening District Stroll", estimatedCostUsd: 18, scheduledDay: "Day 3", notes: "Low-key night experience with cafés and lights." }
+  ],
+  shopping: [
+    { name: "Designer Boulevard Walk", estimatedCostUsd: 0, scheduledDay: "Day 1", notes: "Browse flagship stores and window-shopping districts." },
+    { name: "Vintage Market Hunt", estimatedCostUsd: 20, scheduledDay: "Day 2", notes: "Explore local markets for unique finds and gifts." },
+    { name: "Department Store Tour", estimatedCostUsd: 0, scheduledDay: "Day 3", notes: "Visit major stores with curated shopping floors." }
+  ],
+  "day trips": [
+    { name: "Versailles Day Excursion", estimatedCostUsd: 55, scheduledDay: "Day 3", notes: "Half-day to full-day palace and gardens visit." },
+    { name: "Regional Town Rail Trip", estimatedCostUsd: 45, scheduledDay: "Day 4", notes: "Explore nearby historic town by train." },
+    { name: "Countryside Scenic Day", estimatedCostUsd: 50, scheduledDay: "Day 5", notes: "Relaxed day trip outside the city center." }
+  ]
+};
 
 const TOOL_MONITOR_TYPES = new Set([
   "tool_call_started",
@@ -1346,6 +1388,7 @@ function normalizeActivities(items) {
 
 function pickActivityOptionsForCategory(items, category) {
   const normalizedCategory = String(category || "").toLowerCase().trim();
+  const categoryKey = resolveActivityCategoryKey(normalizedCategory);
   const terms = normalizedCategory
     .split(/\s+/)
     .map((term) => term.replace(/[^a-z]/g, ""))
@@ -1359,11 +1402,50 @@ function pickActivityOptionsForCategory(items, category) {
     })
     .sort((a, b) => b.score - a.score);
 
-  const withMatches = scored.filter((item) => item.score > 0).map((item) => item.activity);
-  if (withMatches.length >= 3) return withMatches.slice(0, 3);
+  const selected = [];
+  const selectedNames = new Set();
 
-  const fallback = items.filter((activity) => !withMatches.some((matched) => matched.id === activity.id));
-  return [...withMatches, ...fallback].slice(0, 3);
+  const pushUnique = (activity) => {
+    if (!activity || !activity.name) return;
+    const nameKey = String(activity.name).toLowerCase().trim();
+    if (!nameKey || selectedNames.has(nameKey)) return;
+    selectedNames.add(nameKey);
+    selected.push(activity);
+  };
+
+  scored
+    .filter((item) => item.score > 0)
+    .map((item) => item.activity)
+    .forEach(pushUnique);
+
+  const categoryFallbacks = CATEGORY_ACTIVITY_FALLBACKS[categoryKey] || [];
+  categoryFallbacks.forEach((fallback, index) => {
+    pushUnique({
+      id: `fallback-${slugify(categoryKey)}-${index + 1}`,
+      name: fallback.name,
+      estimatedCostUsd: Number(fallback.estimatedCostUsd || 0),
+      scheduledDay: fallback.scheduledDay || "",
+      notes: fallback.notes || ""
+    });
+  });
+
+  const genericFallback = scored.map((item) => item.activity);
+  genericFallback.forEach(pushUnique);
+
+  return selected.slice(0, 3);
+}
+
+function resolveActivityCategoryKey(category) {
+  const text = String(category || "").toLowerCase();
+  if (text.includes("museum")) return "museums";
+  if (text.includes("cafe")) return "cafes";
+  if (text.includes("walking") || text.includes("tour")) return "walking tours";
+  if (text.includes("histor")) return "historical sites";
+  if (text.includes("food")) return "food tours";
+  if (text.includes("night")) return "nightlife";
+  if (text.includes("shop")) return "shopping";
+  if (text.includes("day") && text.includes("trip")) return "day trips";
+  return text || "walking tours";
 }
 
 function slugify(value) {

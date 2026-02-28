@@ -48,28 +48,27 @@ label {
   font-size: 14px;
 }
 
-.activity-fieldset {
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  margin: 0;
-  padding: 8px;
-}
-
-.activity-fieldset legend {
-  padding: 0 6px;
+.activity-categories-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   font-size: 14px;
-  font-weight: 600;
 }
 
-.activity-select-grid {
+.activity-select-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
 
-.activity-select-grid label {
-  font-size: 13px;
-  gap: 5px;
+.activity-select-row select {
+  width: 100%;
+}
+
+@media (max-width: 780px) {
+  .activity-select-row {
+    grid-template-columns: 1fr;
+  }
 }
 
 .activity-category-card {
