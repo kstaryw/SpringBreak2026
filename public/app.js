@@ -495,7 +495,10 @@ function renderItinerary(planData) {
               <strong>${escapeHtml(option.label || option.id)}</strong>
             </div>
             <div class="muted">${escapeHtml(option.notes || "")}</div>
-            <pre>${escapeHtml(JSON.stringify(option, null, 2))}</pre>
+            <details>
+              <summary>Show JSON</summary>
+              <pre>${escapeHtml(JSON.stringify(option, null, 2))}</pre>
+            </details>
           </label>
         `
       )
