@@ -6,6 +6,7 @@ import { randomUUID } from "crypto";
 import {
   buildItineraryDraft,
   createFinalReview,
+  recomputeDependentComponentsFromFlight,
   validateTripRequest,
   TRIP_COMPONENTS
 } from "./src/agents/tripPlanner.js";
@@ -79,8 +80,15 @@ app.post("/api/plan-stream", async (req, res) => {
 
   const pushEvent = (eventName, payload) => {
     if (responseClosed) return;
+    
+    // Wrap all SSE payloads in a consistent envelope with timestamp
+    const envelope = {
+      ts: new Date().toISOString(),
+      ...payload
+    };
+    
     res.write(`event: ${eventName}\n`);
-    res.write(`data: ${JSON.stringify(payload)}\n\n`);
+    res.write(`data: ${JSON.stringify(envelope)}\n\n`);
   };
 
   try {
@@ -148,6 +156,13 @@ app.post("/api/confirm-component", async (req, res) => {
     confirmedAt: new Date().toISOString()
   };
 
+  if (componentType === "flight") {
+    record.itinerary = recomputeDependentComponentsFromFlight(record.itinerary, optionId);
+    record.confirmations.hotel = null;
+    record.confirmations.carRental = null;
+    record.finalReview = null;
+  }
+
   const remainingComponent = nextComponentToConfirm(record.confirmations);
   if (!remainingComponent) {
     record.finalReview = await createFinalReview(record.preferences, record.itinerary, record.confirmations);
@@ -155,6 +170,7 @@ app.post("/api/confirm-component", async (req, res) => {
 
   res.json({
     itineraryId,
+    itinerary: record.itinerary,
     confirmations: record.confirmations,
     nextComponentToConfirm: remainingComponent,
     finalReview: record.finalReview ?? null

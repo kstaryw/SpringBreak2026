@@ -326,9 +326,19 @@ function attachConfirmHandlers(itineraryId) {
           throw new Error(apiErrorMessage(data, "Failed to confirm component"));
         }
 
+        if (data.itinerary) {
+          currentPlan = {
+            ...currentPlan,
+            ...data,
+            itinerary: data.itinerary
+          };
+          renderItinerary(currentPlan);
+        }
+
         if (!data.nextComponentToConfirm) {
+          currentPlan = { ...currentPlan, finalReview: data.finalReview ?? null };
           setMessage("All components confirmed. Please review final summary.");
-          maybeRenderFinalAction({ ...currentPlan, finalReview: data.finalReview });
+          maybeRenderFinalAction(currentPlan);
         } else {
           setMessage(`Confirmed ${componentType}. Next: confirm ${data.nextComponentToConfirm}.`);
         }

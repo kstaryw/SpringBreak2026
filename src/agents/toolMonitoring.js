@@ -1,3 +1,11 @@
+// Use event types from tripPlanner to ensure consistency
+export const EventTypes = {
+  TOOL_CALL_STARTED: "tool_call_started",
+  TOOL_CALL_COMPLETED: "tool_call_completed",
+  WEB_SEARCH_CALLED: "web_search_called",
+  WEB_SEARCH_OUTPUT: "web_search_output"
+};
+
 export function tagToolForMonitoring(toolInstance, metadata = {}) {
   if (!toolInstance || typeof toolInstance !== "object") {
     return toolInstance;
@@ -35,13 +43,13 @@ export function attachStandardToolMonitoring(runner, { emit, stage, fallbackAgen
     });
 
     emit({
-      type: "tool_call_started",
+      type: EventTypes.TOOL_CALL_STARTED,
       ...payload
     });
 
     if (payload.isWebSearch) {
       emit({
-        type: "web_search_called",
+        type: EventTypes.WEB_SEARCH_CALLED,
         ...payload,
         message: `Web search tool called (${payload.monitorLabel || "default"}).`
       });
@@ -60,13 +68,13 @@ export function attachStandardToolMonitoring(runner, { emit, stage, fallbackAgen
     });
 
     emit({
-      type: "tool_call_completed",
+      type: EventTypes.TOOL_CALL_COMPLETED,
       ...payload
     });
 
     if (payload.isWebSearch) {
       emit({
-        type: "web_search_output",
+        type: EventTypes.WEB_SEARCH_OUTPUT,
         ...payload,
         message: `Web search tool output received (${payload.monitorLabel || "default"}).`
       });

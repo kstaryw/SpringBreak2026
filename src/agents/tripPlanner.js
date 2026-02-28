@@ -8,6 +8,61 @@ import {
 
 export const TRIP_COMPONENTS = ["flight", "hotel", "carRental"];
 
+// Strict event schema for live agent activity timeline
+export const EventTypes = {
+  STAGE_STARTED: "stage_started",
+  STAGE_COMPLETED: "stage_completed",
+  AGENT_PROMPT: "agent_prompt",
+  AGENT_RESPONSE: "agent_response",
+  TOOL_CALL_STARTED: "tool_call_started",
+  TOOL_CALL_COMPLETED: "tool_call_completed",
+  WEB_SEARCH_CALLED: "web_search_called",
+  WEB_SEARCH_OUTPUT: "web_search_output"
+};
+
+export const StageNames = {
+  INITIALIZATION: "initialization",
+  RESEARCH: "research",
+  SAFETY: "safety",
+  COMPOSITION: "composition",
+  FINAL: "final"
+};
+
+/**
+ * Redact sensitive information from prompts
+ */
+function redactPrompt(prompt) {
+  if (!prompt || typeof prompt !== "string") return "[prompt redacted]";
+  
+  // Return a summary instead of full prompt
+  const lines = prompt.split("\n");
+  const firstLine = lines[0] || "";
+  return firstLine.length > 100 ? firstLine.slice(0, 100) + "..." : firstLine;
+}
+
+/**
+ * Summarize responses to avoid overwhelming the timeline
+ */
+function summarizeResponse(response) {
+  if (!response || typeof response !== "string") return "[no response]";
+  
+  // For JSON responses, indicate structure
+  if (response.trim().startsWith("{") || response.trim().startsWith("[")) {
+    try {
+      const parsed = JSON.parse(response);
+      if (Array.isArray(parsed)) {
+        return `[JSON Array with ${parsed.length} items]`;
+      }
+      const keys = Object.keys(parsed);
+      return `[JSON Object with keys: ${keys.slice(0, 5).join(", ")}${keys.length > 5 ? "..." : ""}]`;
+    } catch {
+      // Fall through to length-based summary
+    }
+  }
+  
+  return response.length > 200 ? response.slice(0, 200) + "..." : response;
+}
+
 const requestedModel = (process.env.OPENAI_MODEL || "").trim();
 const model =
   !requestedModel || requestedModel === "gpt-5.3-codex"
@@ -176,12 +231,70 @@ export function validateTripRequest(input) {
   return tripRequestSchema.safeParse(input);
 }
 
+export function recomputeDependentComponentsFromFlight(itinerary, confirmedFlightOptionId) {
+  const nextItinerary = structuredClone(itinerary ?? {});
+  nextItinerary.components = nextItinerary.components ?? {};
+
+  const flightComponent = nextItinerary.components.flight;
+  const selectedFlight =
+    flightComponent?.options?.find((option) => option.id === confirmedFlightOptionId) ??
+    null;
+
+  if (!selectedFlight) {
+    return nextItinerary;
+  }
+
+  nextItinerary.components.flight = {
+    ...flightComponent,
+    recommendedOptionId: confirmedFlightOptionId
+  };
+
+  const fallbackStay = nextItinerary.stayAtDestination ?? {
+    arrivalLocal: selectedFlight.outboundArrivalLocal ?? null,
+    departureLocal: selectedFlight.returnDepartureLocal ?? null,
+    daysAtDestination: 1,
+    nightsAtDestination: 0,
+    calculationNote: "Fallback stay values used."
+  };
+
+  const arrivalDate = extractLocalDatePart(selectedFlight.outboundArrivalLocal);
+  const departureDate = extractLocalDatePart(selectedFlight.returnDepartureLocal);
+  const nights = dayDiffFromLocalDates(arrivalDate, departureDate);
+
+  const recomputedStay =
+    typeof nights === "number"
+      ? {
+          arrivalLocal: selectedFlight.outboundArrivalLocal ?? fallbackStay.arrivalLocal,
+          departureLocal: selectedFlight.returnDepartureLocal ?? fallbackStay.departureLocal,
+          daysAtDestination: Math.max(1, nights + 1),
+          nightsAtDestination: Math.max(0, nights),
+          calculationNote:
+            "Recomputed from confirmed flight local date parts (arrival and return departure)."
+        }
+      : fallbackStay;
+
+  nextItinerary.stayAtDestination = recomputedStay;
+  nextItinerary.components.hotel = normalizeHotelComponent(
+    nextItinerary.components.hotel,
+    nextItinerary.components.hotel?.options ?? [],
+    recomputedStay
+  );
+  nextItinerary.components.carRental = normalizeCarComponent(
+    nextItinerary.components.carRental,
+    nextItinerary.components.carRental?.options ?? [],
+    recomputedStay
+  );
+  nextItinerary.estimatedCostSummary = estimateTotals(nextItinerary);
+
+  return nextItinerary;
+}
+
 export async function buildItineraryDraft(preferences, options = {}) {
   const emit = typeof options.onEvent === "function" ? options.onEvent : () => {};
 
   emit({
-    type: "planning_started",
-    stage: "initialization",
+    type: EventTypes.STAGE_STARTED,
+    stage: StageNames.INITIALIZATION,
     message: "Planning session started. Agents are preparing inputs."
   });
 
@@ -197,49 +310,73 @@ export async function buildItineraryDraft(preferences, options = {}) {
   ].join("\n");
 
   emit({
-    type: "agent_started",
-    stage: "research",
+    type: EventTypes.STAGE_COMPLETED,
+    stage: StageNames.INITIALIZATION,
+    message: "Planning inputs prepared.",
+    stage_summary: {
+      destination: preferences.destinationCity,
+      dates: `${preferences.startDate} to ${preferences.endDate}`,
+      tripLength: `${preferences.tripLengthDays} days`
+    }
+  });
+
+  emit({
+    type: EventTypes.STAGE_STARTED,
+    stage: StageNames.RESEARCH,
     agent: "TripResearchAgent",
     message: "Researching flights, hotels, car rentals, and activity ideas (using web search)."
   });
   const researchResult = await runAgentWithTelemetry({
     agent: researchAgent,
     agentName: "TripResearchAgent",
-    stage: "research",
+    stage: StageNames.RESEARCH,
     input: researchInput,
     emit
   });
 
+  const researchJson = parseAgentJson(extractAgentText(researchResult), "researchAgent");
+  const researchSummary = summarizeResearch(researchJson);
+  
   emit({
-    type: "agent_started",
-    stage: "safety",
+    type: EventTypes.STAGE_COMPLETED,
+    stage: StageNames.RESEARCH,
+    agent: "TripResearchAgent",
+    message: "Research complete.",
+    stage_summary: {
+      flightOptions: researchSummary.flightOptions,
+      hotelOptions: researchSummary.hotelOptions,
+      carRentalOptions: researchSummary.carRentalOptions,
+      activityIdeas: researchSummary.activityIdeas
+    }
+  });
+
+  emit({
+    type: EventTypes.STAGE_STARTED,
+    stage: StageNames.SAFETY,
     agent: "SafetyPackingAgent",
     message: "Checking safety considerations, weather, and packing guidance (using web search)."
   });
   const safetyResult = await runAgentWithTelemetry({
     agent: safetyPackingAgent,
     agentName: "SafetyPackingAgent",
-    stage: "safety",
+    stage: StageNames.SAFETY,
     input: safetyInput,
     emit
   });
 
-  const researchJson = parseAgentJson(extractAgentText(researchResult), "researchAgent");
-  emit({
-    type: "agent_completed",
-    stage: "research",
-    agent: "TripResearchAgent",
-    message: "Research complete.",
-    summary: summarizeResearch(researchJson)
-  });
-
   const safetyJson = parseAgentJson(extractAgentText(safetyResult), "safetyPackingAgent");
+  const safetySummary = summarizeSafety(safetyJson);
+  
   emit({
-    type: "agent_completed",
-    stage: "safety",
+    type: EventTypes.STAGE_COMPLETED,
+    stage: StageNames.SAFETY,
     agent: "SafetyPackingAgent",
     message: "Safety and packing analysis complete.",
-    summary: summarizeSafety(safetyJson)
+    stage_summary: {
+      safetyConcerns: safetySummary.safetyConcerns,
+      packingItems: safetySummary.packingItems,
+      localTransportTips: safetySummary.localTransportTips
+    }
   });
 
   const itineraryInput = [
@@ -252,27 +389,35 @@ export async function buildItineraryDraft(preferences, options = {}) {
   ].join("\n");
 
   emit({
-    type: "agent_started",
-    stage: "composition",
+    type: EventTypes.STAGE_STARTED,
+    stage: StageNames.COMPOSITION,
     agent: "ItineraryComposerAgent",
     message: "Composing itinerary, costs, and confirmation questions."
   });
   const itineraryResult = await runAgentWithTelemetry({
     agent: itineraryAgent,
     agentName: "ItineraryComposerAgent",
-    stage: "composition",
+    stage: StageNames.COMPOSITION,
     input: itineraryInput,
     emit
   });
   const itineraryDraft = parseAgentJson(extractAgentText(itineraryResult), "itineraryAgent");
 
   const normalized = normalizeItinerary(itineraryDraft, researchJson, safetyJson, preferences);
+  const itinerarySummary = summarizeItinerary(normalized);
+  
   emit({
-    type: "agent_completed",
-    stage: "composition",
+    type: EventTypes.STAGE_COMPLETED,
+    stage: StageNames.COMPOSITION,
     agent: "ItineraryComposerAgent",
     message: "Itinerary draft is ready for your review.",
-    summary: summarizeItinerary(normalized)
+    stage_summary: {
+      components: itinerarySummary.components,
+      activities: itinerarySummary.activities,
+      estimatedTotalUsd: itinerarySummary.estimatedTotalUsd,
+      daysAtDestination: itinerarySummary.daysAtDestination,
+      nightsAtDestination: itinerarySummary.nightsAtDestination
+    }
   });
 
   return normalized;
@@ -518,22 +663,21 @@ function computeDestinationStay(itinerary, researchJson, preferences) {
     (researchJson?.flightOptions ?? [])[0] ??
     null;
 
-  const arrival = parseDateSafe(flightOption?.outboundArrivalLocal);
-  const departure = parseDateSafe(flightOption?.returnDepartureLocal);
+  const arrivalDate = extractLocalDatePart(flightOption?.outboundArrivalLocal);
+  const departureDate = extractLocalDatePart(flightOption?.returnDepartureLocal);
+  const flightNights = dayDiffFromLocalDates(arrivalDate, departureDate);
 
-  if (arrival && departure && departure > arrival) {
-    const millisecondsPerDay = 24 * 60 * 60 * 1000;
-    const rawDiffDays = (departure.getTime() - arrival.getTime()) / millisecondsPerDay;
-    const nightsAtDestination = Math.max(1, Math.ceil(rawDiffDays));
-    const daysAtDestination = Math.max(1, nightsAtDestination + 1);
+  if (typeof flightNights === "number" && flightNights >= 0) {
+    const nightsAtDestination = Math.max(0, flightNights);
+    const daysAtDestination = nightsAtDestination + 1;
 
     return {
-      arrivalLocal: flightOption?.outboundArrivalLocal ?? arrival.toISOString(),
-      departureLocal: flightOption?.returnDepartureLocal ?? departure.toISOString(),
-      daysAtDestination: Math.min(daysAtDestination, baseline.daysAtDestination + 1),
-      nightsAtDestination: Math.min(nightsAtDestination, baseline.nightsAtDestination + 1),
+      arrivalLocal: flightOption?.outboundArrivalLocal ?? baseline.arrivalLocal,
+      departureLocal: flightOption?.returnDepartureLocal ?? baseline.departureLocal,
+      daysAtDestination,
+      nightsAtDestination,
       calculationNote:
-        "Calculated using flight arrival/departure schedule, with start/end date window as baseline (supports overnight travel)."
+        "Calculated from local flight date parts (arrival and return departure), which handles overnight travel and timezone offsets."
     };
   }
 
@@ -560,14 +704,34 @@ function computeBaselineStay(preferences) {
   }
 
   const millisecondsPerDay = 24 * 60 * 60 * 1000;
-  const diffDays = Math.ceil((end.getTime() - start.getTime()) / millisecondsPerDay);
+  const diffDays = Math.floor((end.getTime() - start.getTime()) / millisecondsPerDay);
 
   return {
     arrivalLocal: preferences?.startDate ?? null,
     departureLocal: preferences?.endDate ?? null,
-    daysAtDestination: Math.max(1, diffDays + 1),
-    nightsAtDestination: Math.max(1, diffDays)
+    daysAtDestination: Math.max(1, diffDays),
+    nightsAtDestination: Math.max(0, diffDays - 1)
   };
+}
+
+function extractLocalDatePart(dateTimeString) {
+  if (!dateTimeString || typeof dateTimeString !== "string") return null;
+  const [datePart] = dateTimeString.split("T");
+  if (!datePart || !/^\d{4}-\d{2}-\d{2}$/.test(datePart)) return null;
+  return datePart;
+}
+
+function dayDiffFromLocalDates(startDatePart, endDatePart) {
+  if (!startDatePart || !endDatePart) return null;
+
+  const start = new Date(`${startDatePart}T00:00:00Z`);
+  const end = new Date(`${endDatePart}T00:00:00Z`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) {
+    return null;
+  }
+
+  const millisecondsPerDay = 24 * 60 * 60 * 1000;
+  return Math.floor((end.getTime() - start.getTime()) / millisecondsPerDay);
 }
 
 function parseDateSafe(value) {
@@ -578,11 +742,11 @@ function parseDateSafe(value) {
 
 async function runAgentWithTelemetry({ agent, agentName, stage, input, emit }) {
   emit({
-    type: "agent_prompt",
+    type: EventTypes.AGENT_PROMPT,
     stage,
     agent: agentName,
     message: `Prompt sent to ${agentName}.`,
-    prompt: input
+    prompt: redactPrompt(input)
   });
 
   const runner = new Runner();
@@ -654,11 +818,11 @@ async function runAgentWithTelemetry({ agent, agentName, stage, input, emit }) {
   }
 
   emit({
-    type: "agent_response",
+    type: EventTypes.AGENT_RESPONSE,
     stage,
     agent: agentName,
     message: `Response received from ${agentName}.`,
-    response: responseText
+    response: summarizeResponse(responseText)
   });
 
   return streamedResult;
