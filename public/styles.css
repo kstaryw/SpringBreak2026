@@ -48,6 +48,40 @@ label {
   font-size: 14px;
 }
 
+.activity-fieldset {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  margin: 0;
+  padding: 8px;
+}
+
+.activity-fieldset legend {
+  padding: 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.activity-category-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 8px;
+}
+
+.check-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 6px 8px;
+  background: #fff;
+  font-size: 13px;
+}
+
+.check-option input[type="checkbox"] {
+  margin: 0;
+}
+
 input,
 select,
 button {

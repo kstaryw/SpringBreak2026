@@ -58,6 +58,10 @@ form.addEventListener("submit", async (event) => {
   event.preventDefault();
 
   const payload = formToPayload(new FormData(form));
+  if (!payload.activities.length) {
+    setMessage("Select at least one activity category (or add a custom activity).", true);
+    return;
+  }
   const submitButton = form.querySelector("button[type='submit']");
   submitButton.disabled = true;
   resetTimeline();
@@ -577,16 +581,23 @@ function safeStringify(value) {
 }
 
 function formToPayload(formData) {
+  const selectedCategories = formData
+    .getAll("activityCategory")
+    .map((value) => String(value).trim())
+    .filter(Boolean);
+  const customActivities = String(formData.get("activitiesCustom") || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const mergedActivities = [...new Set([...selectedCategories, ...customActivities])];
+
   return {
     startCity: String(formData.get("startCity") || "").trim(),
     destinationCity: String(formData.get("destinationCity") || "").trim(),
     startDate: String(formData.get("startDate") || "").trim(),
     endDate: String(formData.get("endDate") || "").trim(),
     tripLengthDays: Number(formData.get("tripLengthDays")),
-    activities: String(formData.get("activities") || "")
-      .split(",")
-      .map((value) => value.trim())
-      .filter(Boolean),
+    activities: mergedActivities,
     weatherPreferences: String(formData.get("weatherPreferences") || "").trim(),
     airTravelClass: String(formData.get("airTravelClass") || "economy"),
     hotelStars: String(formData.get("hotelStars") || "3"),

@@ -56,13 +56,25 @@
               required
               value="8"
           /></label>
+          <fieldset class="activity-fieldset">
+            <legend>Activity Categories</legend>
+            <div class="activity-category-grid">
+              <label class="check-option"><input type="checkbox" name="activityCategory" value="museums" checked /> Museums</label>
+              <label class="check-option"><input type="checkbox" name="activityCategory" value="cafes" checked /> Cafés</label>
+              <label class="check-option"><input type="checkbox" name="activityCategory" value="walking tours" checked /> Walking Tours</label>
+              <label class="check-option"><input type="checkbox" name="activityCategory" value="historical sites" /> Historical Sites</label>
+              <label class="check-option"><input type="checkbox" name="activityCategory" value="food tours" /> Food Tours</label>
+              <label class="check-option"><input type="checkbox" name="activityCategory" value="nightlife" /> Nightlife</label>
+              <label class="check-option"><input type="checkbox" name="activityCategory" value="shopping" /> Shopping</label>
+              <label class="check-option"><input type="checkbox" name="activityCategory" value="day trips" /> Day Trips</label>
+            </div>
+          </fieldset>
           <label
-            >Activities (comma-separated)
+            >Additional Activities (optional, comma-separated)
             <input
-              name="activities"
-              required
-              value="museums, cafes, walking tours"
-              placeholder="museums, skiing, food tours"
+              name="activitiesCustom"
+              value=""
+              placeholder="e.g., biking, river cruise"
             />
           </label>
           <label
