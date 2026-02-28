@@ -11,49 +11,6 @@ const toolMonitorList = document.getElementById("tool-monitor-list");
 const startDateInput = form?.querySelector('input[name="startDate"]');
 const endDateInput = form?.querySelector('input[name="endDate"]');
 const tripLengthInput = form?.querySelector('input[name="tripLengthDays"]');
-const CATEGORY_ACTIVITY_FALLBACKS = {
-  museums: [
-    { name: "Louvre Museum Visit", estimatedCostUsd: 25, scheduledDay: "Day 1", notes: "Explore world-renowned art collections and iconic galleries." },
-    { name: "Musée d'Orsay Highlights", estimatedCostUsd: 20, scheduledDay: "Day 2", notes: "See impressionist masterpieces in a historic station setting." },
-    { name: "Centre Pompidou Modern Art", estimatedCostUsd: 18, scheduledDay: "Day 3", notes: "Discover modern and contemporary collections with city views." }
-  ],
-  cafes: [
-    { name: "Café Culture Morning", estimatedCostUsd: 15, scheduledDay: "Day 1", notes: "Try classic pastries and coffee at neighborhood cafés." },
-    { name: "Saint-Germain Café Hop", estimatedCostUsd: 22, scheduledDay: "Day 2", notes: "Visit notable Left Bank cafés with local ambience." },
-    { name: "Canal-side Coffee Walk", estimatedCostUsd: 16, scheduledDay: "Day 3", notes: "Relaxed café stops paired with scenic neighborhood strolls." }
-  ],
-  "walking tours": [
-    { name: "Seine River Walking Tour", estimatedCostUsd: 25, scheduledDay: "Day 1", notes: "Guided route past major landmarks along the river." },
-    { name: "Montmartre Walking Tour", estimatedCostUsd: 24, scheduledDay: "Day 2", notes: "Explore hilltop streets, art history, and city viewpoints." },
-    { name: "Historic Center Walk", estimatedCostUsd: 20, scheduledDay: "Day 3", notes: "Orientation walk through old quarters and hidden passages." }
-  ],
-  "historical sites": [
-    { name: "Notre-Dame & Île de la Cité", estimatedCostUsd: 12, scheduledDay: "Day 1", notes: "Visit the historic core and surrounding landmarks." },
-    { name: "Palace and Gardens Visit", estimatedCostUsd: 28, scheduledDay: "Day 2", notes: "Guided historical context at a major royal site." },
-    { name: "Latin Quarter History Walk", estimatedCostUsd: 18, scheduledDay: "Day 3", notes: "Learn local history across medieval streets and squares." }
-  ],
-  "food tours": [
-    { name: "Local Market Tasting Tour", estimatedCostUsd: 35, scheduledDay: "Day 1", notes: "Sample regional specialties with a local guide." },
-    { name: "Neighborhood Bakery Trail", estimatedCostUsd: 22, scheduledDay: "Day 2", notes: "Taste breads, pastries, and desserts at top bakeries." },
-    { name: "Evening Food Walk", estimatedCostUsd: 38, scheduledDay: "Day 3", notes: "Try signature dishes across multiple local stops." }
-  ],
-  nightlife: [
-    { name: "Jazz Club Evening", estimatedCostUsd: 30, scheduledDay: "Day 1", notes: "Live music in a classic late-evening venue." },
-    { name: "Rooftop Night View", estimatedCostUsd: 26, scheduledDay: "Day 2", notes: "Panoramic night skyline from a central rooftop spot." },
-    { name: "Evening District Stroll", estimatedCostUsd: 18, scheduledDay: "Day 3", notes: "Low-key night experience with cafés and lights." }
-  ],
-  shopping: [
-    { name: "Designer Boulevard Walk", estimatedCostUsd: 0, scheduledDay: "Day 1", notes: "Browse flagship stores and window-shopping districts." },
-    { name: "Vintage Market Hunt", estimatedCostUsd: 20, scheduledDay: "Day 2", notes: "Explore local markets for unique finds and gifts." },
-    { name: "Department Store Tour", estimatedCostUsd: 0, scheduledDay: "Day 3", notes: "Visit major stores with curated shopping floors." }
-  ],
-  "day trips": [
-    { name: "Versailles Day Excursion", estimatedCostUsd: 55, scheduledDay: "Day 3", notes: "Half-day to full-day palace and gardens visit." },
-    { name: "Regional Town Rail Trip", estimatedCostUsd: 45, scheduledDay: "Day 4", notes: "Explore nearby historic town by train." },
-    { name: "Countryside Scenic Day", estimatedCostUsd: 50, scheduledDay: "Day 5", notes: "Relaxed day trip outside the city center." }
-  ]
-};
-
 const TOOL_MONITOR_TYPES = new Set([
   "tool_call_started",
   "tool_call_completed",
@@ -1468,6 +1425,7 @@ function normalizeActivities(items) {
         return {
           id: `activity-${index}`,
           name: activity,
+          category: "",
           estimatedCostUsd: 0,
           scheduledDay: "",
           notes: ""
@@ -1477,6 +1435,7 @@ function normalizeActivities(items) {
       return {
         id: String(activity?.id || `activity-${index}`),
         name: String(activity?.name || `Activity ${index + 1}`),
+        category: String(activity?.category || "").toLowerCase().trim(),
         estimatedCostUsd: Number(activity?.estimatedCostUsd || 0),
         scheduledDay: String(activity?.scheduledDay || ""),
         notes: String(activity?.notes || "")
@@ -1487,64 +1446,47 @@ function normalizeActivities(items) {
 
 function pickActivityOptionsForCategory(items, category) {
   const normalizedCategory = String(category || "").toLowerCase().trim();
-  const categoryKey = resolveActivityCategoryKey(normalizedCategory);
+
+  // 1. Exact category match from agent-provided category field
+  const exactMatches = items.filter(
+    (a) => a.category && a.category === normalizedCategory
+  );
+  if (exactMatches.length >= 3) return exactMatches.slice(0, 3);
+
+  // 2. Fuzzy match: check if agent category contains key terms or vice versa
+  const fuzzyMatches = items.filter((a) => {
+    if (!a.category) return false;
+    return a.category.includes(normalizedCategory) || normalizedCategory.includes(a.category);
+  });
+  const combined = [...exactMatches];
+  const seenIds = new Set(combined.map((a) => a.id));
+  fuzzyMatches.forEach((a) => {
+    if (!seenIds.has(a.id)) { combined.push(a); seenIds.add(a.id); }
+  });
+  if (combined.length >= 3) return combined.slice(0, 3);
+
+  // 3. Keyword scoring on name/notes (for activities without a category field)
   const terms = normalizedCategory
     .split(/\s+/)
     .map((term) => term.replace(/[^a-z]/g, ""))
     .filter(Boolean);
-
   const scored = items
+    .filter((a) => !seenIds.has(a.id))
     .map((activity) => {
-      const haystack = `${activity.name} ${activity.notes}`.toLowerCase();
+      const haystack = `${activity.name} ${activity.notes} ${activity.category}`.toLowerCase();
       const score = terms.reduce((sum, term) => sum + (haystack.includes(term) ? 1 : 0), 0);
       return { activity, score };
     })
-    .sort((a, b) => b.score - a.score);
-
-  const selected = [];
-  const selectedNames = new Set();
-
-  const pushUnique = (activity) => {
-    if (!activity || !activity.name) return;
-    const nameKey = String(activity.name).toLowerCase().trim();
-    if (!nameKey || selectedNames.has(nameKey)) return;
-    selectedNames.add(nameKey);
-    selected.push(activity);
-  };
-
-  scored
     .filter((item) => item.score > 0)
-    .map((item) => item.activity)
-    .forEach(pushUnique);
+    .sort((a, b) => b.score - a.score)
+    .map((item) => item.activity);
 
-  const categoryFallbacks = CATEGORY_ACTIVITY_FALLBACKS[categoryKey] || [];
-  categoryFallbacks.forEach((fallback, index) => {
-    pushUnique({
-      id: `fallback-${slugify(categoryKey)}-${index + 1}`,
-      name: fallback.name,
-      estimatedCostUsd: Number(fallback.estimatedCostUsd || 0),
-      scheduledDay: fallback.scheduledDay || "",
-      notes: fallback.notes || ""
-    });
+  scored.forEach((a) => {
+    if (!seenIds.has(a.id)) { combined.push(a); seenIds.add(a.id); }
   });
 
-  const genericFallback = scored.map((item) => item.activity);
-  genericFallback.forEach(pushUnique);
-
-  return selected.slice(0, 3);
-}
-
-function resolveActivityCategoryKey(category) {
-  const text = String(category || "").toLowerCase();
-  if (text.includes("museum")) return "museums";
-  if (text.includes("cafe")) return "cafes";
-  if (text.includes("walking") || text.includes("tour")) return "walking tours";
-  if (text.includes("histor")) return "historical sites";
-  if (text.includes("food")) return "food tours";
-  if (text.includes("night")) return "nightlife";
-  if (text.includes("shop")) return "shopping";
-  if (text.includes("day") && text.includes("trip")) return "day trips";
-  return text || "walking tours";
+  // NEVER pad with unrelated activities — only show what actually matches
+  return combined.slice(0, 3);
 }
 
 function slugify(value) {

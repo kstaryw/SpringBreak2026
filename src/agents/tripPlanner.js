@@ -147,7 +147,7 @@ You MUST return strict JSON only (no markdown, no prose outside JSON) with this 
   "flightOptions": [{"id":"f1","label":"...","airline":"...","route":"...","class":"economy|business","outboundDepartureLocal":"2026-03-21T19:00:00-04:00","outboundArrivalLocal":"2026-03-22T08:30:00+01:00","returnDepartureLocal":"2026-03-29T10:00:00+01:00","returnArrivalLocal":"2026-03-29T13:00:00-04:00","daysAtDestination":8,"nightsAtDestination":7,"costUsd":1200,"notes":"..."}],
   "hotelOptions": [{"id":"h1","label":"...","stars":4,"nightlyUsd":250,"nights":7,"costUsd":1750,"notes":"..."}],
   "carRentalOptions": [{"id":"c1","label":"...","company":"...","carType":"...","dailyRateUsd":50,"rentalDays":8,"costUsd":400,"notes":"..."}],
-  "activityIdeas": [{"name":"...","estimatedCostUsd":40,"whyFit":"..."}],
+  "activityIdeas": [{"name":"...","category":"museums","estimatedCostUsd":40,"whyFit":"..."}],
   "researchNotes": ["..."],
   "pricingDateNote": "state pricing date caveat"
 }
@@ -155,6 +155,15 @@ Use both user start/end dates and the flight schedule to compute daysAtDestinati
 Account for overnight flights and time zone differences.
 Hotel nights and car rental days MUST align to the computed destination stay.
 Return 2-3 options per component with realistic costs in USD.
+
+IMPORTANT — activityIdeas:
+• The user preferences include an "activities" array listing desired activity categories (e.g. ["museums","food tours","nightlife"]).
+• You MUST return exactly 3 activityIdeas PER requested category.
+  For example, if the user lists 4 categories, return 12 activity ideas total.
+• Every activityIdea MUST include a "category" field matching one of the user's requested categories.
+• Activities MUST be real, well-known attractions or experiences located IN or very near the destination city.
+  Do NOT suggest activities from other cities or countries.
+• If the destination is Hong Kong, suggest Hong Kong activities; if Paris, suggest Paris activities; etc.
 Never suggest making purchases.`,
   tools: [researchWebSearchTool, budgetCalculatorTool]
 });
@@ -195,7 +204,7 @@ Given user preferences plus research and safety JSON, return strict JSON only wi
     "hotel": {"options": [], "recommendedOptionId": "h1", "confirmationQuestion": "..."},
     "carRental": {"options": [], "recommendedOptionId": "c1", "confirmationQuestion": "..."}
   },
-  "activities": [{"name":"...","estimatedCostUsd":0,"scheduledDay":"Day 1","notes":"..."}],
+  "activities": [{"name":"...","category":"museums","estimatedCostUsd":0,"scheduledDay":"Day 1","notes":"..."}],
   "safetyConcerns": ["..."],
   "packingList": ["..."],
   "estimatedCostSummary": {
@@ -211,6 +220,7 @@ The three components flight/hotel/carRental must always be present.
 Ask explicit confirmation questions for each component.
 You MUST call the budget_calculator tool exactly once before returning output.
 Use flight schedule times plus start/end dates to ensure hotel nights and car rental days match stayAtDestination.
+IMPORTANT: Copy ALL activityIdeas from the research data into the activities array. Keep the "category" field on every activity exactly as provided. Do NOT drop or rename categories.
 Never recommend or perform purchasing.`,
   tools: [budgetCalculatorTool]
 });
@@ -298,9 +308,15 @@ export async function buildItineraryDraft(preferences, options = {}) {
     message: "Planning session started. Agents are preparing inputs."
   });
 
+  const activityCategories = Array.isArray(preferences.activities) ? preferences.activities : [];
+
   const researchInput = [
     "Research trip options for these preferences:",
     JSON.stringify(preferences, null, 2),
+    "",
+    `Destination city: ${preferences.destinationCity || "unknown"}`,
+    `Requested activity categories (${activityCategories.length}): ${activityCategories.join(", ") || "general"}`,
+    `Return exactly 3 activityIdeas PER category above (${activityCategories.length * 3} total). Each must include a "category" field matching the category name. All activities MUST be real places/experiences in ${preferences.destinationCity || "the destination city"}.`,
     "Use web search for realistic price ranges and providers."
   ].join("\n");
 
@@ -498,9 +514,16 @@ function normalizeItinerary(rawItinerary, researchJson, safetyJson, preferences)
   );
 
   itinerary.activities = Array.isArray(itinerary.activities)
-    ? itinerary.activities
+    ? itinerary.activities.map((a, i) => ({
+        name: a.name,
+        category: a.category || "",
+        estimatedCostUsd: a.estimatedCostUsd ?? 0,
+        scheduledDay: a.scheduledDay || `Day ${i + 1}`,
+        notes: a.notes || ""
+      }))
     : (researchJson.activityIdeas ?? []).map((activity, index) => ({
         name: activity.name,
+        category: activity.category || "",
         estimatedCostUsd: activity.estimatedCostUsd ?? 0,
         scheduledDay: `Day ${index + 1}`,
         notes: activity.whyFit ?? ""
