@@ -16,6 +16,7 @@ const TOOL_MONITOR_TYPES = new Set([
 ]);
 
 let currentPlan = null;
+const activityGroups = new Map();
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -129,6 +130,7 @@ function parseSseChunk(chunk) {
 function resetTimeline() {
   activitySection.classList.remove("hidden");
   activityList.innerHTML = "";
+  activityGroups.clear();
   toolMonitorSection.classList.remove("hidden");
   toolMonitorList.innerHTML = "";
 }
@@ -166,11 +168,58 @@ function addActivity(eventData) {
     ${details}
   `;
 
-  activityList.appendChild(item);
+  const group = ensureActivityGroup(event.agent || "System");
+  group.itemsList.appendChild(item);
+  group.count += 1;
+  group.countNode.textContent = `${group.count}`;
 
   if (TOOL_MONITOR_TYPES.has(eventType)) {
     addToolMonitorItem(event);
   }
+}
+
+function ensureActivityGroup(agentName) {
+  const key = String(agentName || "System");
+  if (activityGroups.has(key)) {
+    return activityGroups.get(key);
+  }
+
+  const groupItem = document.createElement("li");
+  groupItem.className = "agent-group";
+
+  const details = document.createElement("details");
+  details.open = true;
+
+  const summary = document.createElement("summary");
+  summary.className = "agent-group-summary";
+
+  const title = document.createElement("span");
+  title.className = "agent-group-title";
+  title.textContent = key;
+
+  const count = document.createElement("span");
+  count.className = "agent-group-count";
+  count.textContent = "0";
+
+  summary.appendChild(title);
+  summary.appendChild(count);
+
+  const itemsList = document.createElement("ul");
+  itemsList.className = "agent-group-items";
+
+  details.appendChild(summary);
+  details.appendChild(itemsList);
+  groupItem.appendChild(details);
+  activityList.appendChild(groupItem);
+
+  const group = {
+    itemsList,
+    countNode: count,
+    count: 0
+  };
+
+  activityGroups.set(key, group);
+  return group;
 }
 
 function addToolMonitorItem(event) {

@@ -113,6 +113,47 @@ button:disabled {
   padding: 0;
 }
 
+.agent-group {
+  list-style: none;
+}
+
+.agent-group > details {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 6px 8px;
+  background: #ffffff;
+}
+
+.agent-group-summary {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 600;
+  color: #111827;
+}
+
+.agent-group-title {
+  font-size: 14px;
+}
+
+.agent-group-count {
+  min-width: 22px;
+  text-align: center;
+  font-size: 12px;
+  color: #374151;
+  border: 1px solid #d1d5db;
+  border-radius: 999px;
+  padding: 1px 6px;
+}
+
+.agent-group-items {
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
 #tool-monitor-list {
   display: grid;
   gap: 8px;
