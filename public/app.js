@@ -11,7 +11,6 @@ const toolMonitorList = document.getElementById("tool-monitor-list");
 const startDateInput = form?.querySelector('input[name="startDate"]');
 const endDateInput = form?.querySelector('input[name="endDate"]');
 const tripLengthInput = form?.querySelector('input[name="tripLengthDays"]');
-const ACTIVITY_CATEGORY_FIELDS = ["activityCategory1", "activityCategory2", "activityCategory3"];
 const CATEGORY_ACTIVITY_FALLBACKS = {
   museums: [
     { name: "Louvre Museum Visit", estimatedCostUsd: 25, scheduledDay: "Day 1", notes: "Explore world-renowned art collections and iconic galleries." },
@@ -102,7 +101,7 @@ form.addEventListener("submit", async (event) => {
 
   const payload = formToPayload(new FormData(form));
   if (!payload.activities.length) {
-    setMessage("Select at least one activity category (or add a custom activity).", true);
+    setMessage("Enter at least one activity category.", true);
     return;
   }
   const submitButton = form.querySelector("button[type='submit']");
@@ -117,7 +116,9 @@ form.addEventListener("submit", async (event) => {
     currentPlan = {
       ...data,
       requestedActivityCategories: payload.activities,
-      activitySelections: {}
+      activitySelections: {},
+      activityConfirmed: false,
+      confirmedActivities: []
     };
     setMessage("Draft itinerary created. Please confirm each component.");
     renderItinerary(currentPlan);
@@ -628,11 +629,11 @@ function safeStringify(value) {
 }
 
 function formToPayload(formData) {
-  const selectedCategories = ACTIVITY_CATEGORY_FIELDS
-    .map((fieldName) => formData.get(fieldName))
+  const selectedCategories = String(formData.get("activityCategories") || "")
+    .split(/[\n,;]+/)
     .map((value) => String(value).trim())
     .filter(Boolean);
-  const mergedActivities = [...new Set(selectedCategories)].slice(0, 3);
+  const mergedActivities = [...new Set(selectedCategories)];
 
   return {
     startCity: String(formData.get("startCity") || "").trim(),
@@ -742,6 +743,7 @@ function renderItinerary(planData) {
 
   renderItineraryMap(planData);
   attachActivityChoiceHandlers();
+  attachActivityConfirmHandler();
   attachConfirmHandlers(planData.itineraryId);
   maybeRenderFinalAction(planData);
 }
@@ -873,6 +875,17 @@ function renderFinalItineraryOutput(planData, finalConfirmationResponse = {}) {
   const selectedFlight = findSelectedOption(itinerary.components?.flight, confirmations.flight?.optionId);
   const selectedHotel = findSelectedOption(itinerary.components?.hotel, confirmations.hotel?.optionId);
   const selectedCar = findSelectedOption(itinerary.components?.carRental, confirmations.carRental?.optionId);
+  const confirmedActivities = getConfirmedActivityOptions(planData);
+  const activitiesHtml = confirmedActivities.length
+    ? `<ul class="list">${confirmedActivities
+        .map(
+          (activity) =>
+            `<li>${escapeHtml(activity.category)}: ${escapeHtml(activity.name)} (${escapeHtml(
+              formatUsd(activity.estimatedCostUsd) || "$0"
+            )})</li>`
+        )
+        .join("")}</ul>`
+    : `<div class="muted">No confirmed activities</div>`;
 
   root.innerHTML = `
     <section class="final-itinerary-card">
@@ -895,6 +908,11 @@ function renderFinalItineraryOutput(planData, finalConfirmationResponse = {}) {
         <strong>Car Rental:</strong>
         <div>${escapeHtml(selectedCar?.label || "Not selected")}</div>
         <div class="muted">${escapeHtml(formatUsd(selectedCar?.costUsd) || "$0")}</div>
+      </div>
+
+      <div class="final-item">
+        <strong>Activities:</strong>
+        ${activitiesHtml}
       </div>
 
       <div class="final-item">
@@ -1086,7 +1104,9 @@ async function renderItineraryMap(planData) {
 function buildMapPlaces(planData, destination) {
   const itinerary = planData?.itinerary || {};
   const hotelOptions = itinerary?.components?.hotel?.options || [];
-  const activities = itinerary?.activities || [];
+  const activityOptions = planData?.activityConfirmed
+    ? getConfirmedActivityOptions(planData)
+    : getAllActivityOptions(planData);
   const seen = new Set();
   const places = [];
 
@@ -1106,12 +1126,12 @@ function buildMapPlaces(planData, destination) {
     addPlace("hotel", option.label || option.name || option.id);
   });
 
-  activities.forEach((activity) => {
-    if (typeof activity === "string") {
-      addPlace("activity", activity);
-      return;
-    }
-    addPlace("activity", activity?.name || activity?.location || activity?.title);
+  activityOptions.forEach((activity) => {
+    const label =
+      typeof activity === "string"
+        ? activity
+        : `${activity.name || activity.location || activity.title}${activity.category ? ` (${activity.category})` : ""}`;
+    addPlace("activity", label);
   });
 
   return places;
@@ -1290,27 +1310,17 @@ function formatStay(days, nights) {
 }
 
 function renderActivityCategoryOptions(planData) {
-  const items = normalizeActivities(planData?.itinerary?.activities || []);
-  if (!items.length) return "<p class=\"muted\">No activities.</p>";
+  const optionSets = getActivityCategoryOptionSets(planData);
+  if (!optionSets.length) return "<p class=\"muted\">No activities.</p>";
 
-  const categories =
-    (planData?.requestedActivityCategories || [])
-      .map((value) => String(value).trim())
-      .filter(Boolean)
-      .slice(0, 3);
-
-  const categoriesToRender = categories.length ? categories : ["Activities"];
-  if (!currentPlan.activitySelections) {
-    currentPlan.activitySelections = {};
-  }
-
-  const cards = categoriesToRender
-    .map((category, categoryIndex) => {
-      const options = pickActivityOptionsForCategory(items, category).slice(0, 3);
+  const isConfirmed = Boolean(planData?.activityConfirmed);
+  const cards = optionSets
+    .map((set, categoryIndex) => {
+      const category = set.category;
+      const options = set.options;
       if (!options.length) return "";
 
-      const currentSelection = currentPlan.activitySelections[category] || options[0].id;
-      currentPlan.activitySelections[category] = currentSelection;
+      const currentSelection = (planData.activitySelections || {})[category] || options[0].id;
       const groupName = `activity-category-${slugify(category)}-${categoryIndex}`;
 
       const optionsHtml = options
@@ -1319,7 +1329,7 @@ function renderActivityCategoryOptions(planData) {
           return `
             <label class="option">
               <div class="inline">
-                <input class="activity-choice-input" type="radio" name="${escapeHtml(groupName)}" data-category="${escapeHtml(category)}" value="${escapeHtml(activity.id)}" ${isChecked ? "checked" : ""} />
+                <input class="activity-choice-input" type="radio" name="${escapeHtml(groupName)}" data-category="${escapeHtml(category)}" value="${escapeHtml(activity.id)}" ${isChecked ? "checked" : ""} ${isConfirmed ? "disabled" : ""} />
                 <strong>${escapeHtml(activity.name)}</strong>
               </div>
               <div class="option-facts">
@@ -1341,14 +1351,21 @@ function renderActivityCategoryOptions(planData) {
       return `
         <section class="card activity-category-card">
           <h4>${escapeHtml(toTitleCase(category))}</h4>
-          <p class="muted">Choose one activity option.</p>
+          <p class="muted">${isConfirmed ? "Confirmed" : "Choose one activity option."}</p>
           <div class="component-options">${optionsHtml}</div>
         </section>
       `;
     })
     .join("");
 
-  return cards || "<p class=\"muted\">No activities for selected categories.</p>";
+  const controls = `
+    <div class="activity-confirm-wrap">
+      <button id="confirm-activities-btn" ${isConfirmed ? "disabled" : ""}>${isConfirmed ? "Activities Confirmed" : "Confirm Activities"}</button>
+      <div class="muted">${isConfirmed ? "Map now shows only confirmed activity options." : "Select one option per category, then confirm activities."}</div>
+    </div>
+  `;
+
+  return (cards || "<p class=\"muted\">No activities for selected categories.</p>") + controls;
 }
 
 function attachActivityChoiceHandlers() {
@@ -1358,8 +1375,90 @@ function attachActivityChoiceHandlers() {
       if (!category) return;
       currentPlan.activitySelections = currentPlan.activitySelections || {};
       currentPlan.activitySelections[category] = input.value;
+      if (currentPlan.activityConfirmed) {
+        currentPlan.activityConfirmed = false;
+        currentPlan.confirmedActivities = [];
+      }
+      renderItineraryMap(currentPlan);
     });
   });
+}
+
+function attachActivityConfirmHandler() {
+  const button = document.getElementById("confirm-activities-btn");
+  if (!button) return;
+  button.addEventListener("click", () => {
+    const selected = getSelectedActivityOptions(currentPlan);
+    if (!selected.length) {
+      setItineraryStatus("Choose at least one activity option before confirming activities.", true);
+      return;
+    }
+
+    currentPlan.activityConfirmed = true;
+    currentPlan.confirmedActivities = selected;
+    setItineraryStatus("Activities confirmed. Map now shows only confirmed activity options.");
+    renderItinerary(currentPlan);
+  });
+}
+
+function getActivityCategoryOptionSets(planData) {
+  const items = normalizeActivities(planData?.itinerary?.activities || []);
+  if (!items.length) return [];
+
+  const categories = (planData?.requestedActivityCategories || [])
+    .map((value) => String(value).trim())
+    .filter(Boolean);
+  const categoriesToRender = categories.length ? categories : ["Activities"];
+
+  planData.activitySelections = planData.activitySelections || {};
+
+  return categoriesToRender
+    .map((category) => {
+      const options = pickActivityOptionsForCategory(items, category).slice(0, 3);
+      if (options.length && !planData.activitySelections[category]) {
+        planData.activitySelections[category] = options[0].id;
+      }
+      return { category, options };
+    })
+    .filter((set) => set.options.length > 0);
+}
+
+function getSelectedActivityOptions(planData) {
+  const optionSets = getActivityCategoryOptionSets(planData);
+  return optionSets
+    .map((set) => {
+      const selectedId = planData?.activitySelections?.[set.category] || set.options[0]?.id;
+      const selected = set.options.find((option) => option.id === selectedId) || set.options[0] || null;
+      return selected
+        ? {
+            ...selected,
+            category: set.category
+          }
+        : null;
+    })
+    .filter(Boolean);
+}
+
+function getAllActivityOptions(planData) {
+  const optionSets = getActivityCategoryOptionSets(planData);
+  const all = [];
+  const seen = new Set();
+  optionSets.forEach((set) => {
+    set.options.forEach((option) => {
+      const key = `${set.category}:${option.id}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      all.push({ ...option, category: set.category });
+    });
+  });
+  return all;
+}
+
+function getConfirmedActivityOptions(planData) {
+  if (Array.isArray(planData?.confirmedActivities) && planData.confirmedActivities.length > 0) {
+    return planData.confirmedActivities;
+  }
+  return getSelectedActivityOptions(planData);
 }
 
 function normalizeActivities(items) {

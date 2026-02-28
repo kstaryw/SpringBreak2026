@@ -55,28 +55,25 @@ label {
   font-size: 14px;
 }
 
-.activity-select-row {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.activity-select-row select {
+.activity-categories-field textarea {
   width: 100%;
-}
-
-@media (max-width: 780px) {
-  .activity-select-row {
-    grid-template-columns: 1fr;
-  }
+  resize: vertical;
+  min-height: 84px;
 }
 
 .activity-category-card {
   margin-bottom: 10px;
 }
 
+.activity-confirm-wrap {
+  display: grid;
+  gap: 6px;
+  margin: 4px 0 10px;
+}
+
 input,
 select,
+textarea,
 button {
   font: inherit;
   padding: 8px;
