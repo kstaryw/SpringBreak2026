@@ -57,26 +57,51 @@
               value="8"
           /></label>
           <fieldset class="activity-fieldset">
-            <legend>Activity Categories</legend>
-            <div class="activity-category-grid">
-              <label class="check-option"><input type="checkbox" name="activityCategory" value="museums" checked /> Museums</label>
-              <label class="check-option"><input type="checkbox" name="activityCategory" value="cafes" checked /> Cafés</label>
-              <label class="check-option"><input type="checkbox" name="activityCategory" value="walking tours" checked /> Walking Tours</label>
-              <label class="check-option"><input type="checkbox" name="activityCategory" value="historical sites" /> Historical Sites</label>
-              <label class="check-option"><input type="checkbox" name="activityCategory" value="food tours" /> Food Tours</label>
-              <label class="check-option"><input type="checkbox" name="activityCategory" value="nightlife" /> Nightlife</label>
-              <label class="check-option"><input type="checkbox" name="activityCategory" value="shopping" /> Shopping</label>
-              <label class="check-option"><input type="checkbox" name="activityCategory" value="day trips" /> Day Trips</label>
+            <legend>Activity Categories (choose up to 3)</legend>
+            <div class="activity-select-grid">
+              <label>
+                Activity Category 1
+                <select name="activityCategory1" required>
+                  <option value="museums" selected>Museums</option>
+                  <option value="cafes">Cafés</option>
+                  <option value="walking tours">Walking Tours</option>
+                  <option value="historical sites">Historical Sites</option>
+                  <option value="food tours">Food Tours</option>
+                  <option value="nightlife">Nightlife</option>
+                  <option value="shopping">Shopping</option>
+                  <option value="day trips">Day Trips</option>
+                </select>
+              </label>
+              <label>
+                Activity Category 2
+                <select name="activityCategory2">
+                  <option value="cafes" selected>Cafés</option>
+                  <option value="museums">Museums</option>
+                  <option value="walking tours">Walking Tours</option>
+                  <option value="historical sites">Historical Sites</option>
+                  <option value="food tours">Food Tours</option>
+                  <option value="nightlife">Nightlife</option>
+                  <option value="shopping">Shopping</option>
+                  <option value="day trips">Day Trips</option>
+                  <option value="">None</option>
+                </select>
+              </label>
+              <label>
+                Activity Category 3
+                <select name="activityCategory3">
+                  <option value="walking tours" selected>Walking Tours</option>
+                  <option value="museums">Museums</option>
+                  <option value="cafes">Cafés</option>
+                  <option value="historical sites">Historical Sites</option>
+                  <option value="food tours">Food Tours</option>
+                  <option value="nightlife">Nightlife</option>
+                  <option value="shopping">Shopping</option>
+                  <option value="day trips">Day Trips</option>
+                  <option value="">None</option>
+                </select>
+              </label>
             </div>
           </fieldset>
-          <label
-            >Additional Activities (optional, comma-separated)
-            <input
-              name="activitiesCustom"
-              value=""
-              placeholder="e.g., biking, river cruise"
-            />
-          </label>
           <label
             >Weather Preferences
             <input

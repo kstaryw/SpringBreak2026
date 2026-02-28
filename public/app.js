@@ -11,6 +11,7 @@ const toolMonitorList = document.getElementById("tool-monitor-list");
 const startDateInput = form?.querySelector('input[name="startDate"]');
 const endDateInput = form?.querySelector('input[name="endDate"]');
 const tripLengthInput = form?.querySelector('input[name="tripLengthDays"]');
+const ACTIVITY_CATEGORY_FIELDS = ["activityCategory1", "activityCategory2", "activityCategory3"];
 
 const TOOL_MONITOR_TYPES = new Set([
   "tool_call_started",
@@ -71,7 +72,11 @@ form.addEventListener("submit", async (event) => {
   try {
     const data = await streamPlan(payload);
 
-    currentPlan = data;
+    currentPlan = {
+      ...data,
+      requestedActivityCategories: payload.activities,
+      activitySelections: {}
+    };
     setMessage("Draft itinerary created. Please confirm each component.");
     renderItinerary(currentPlan);
   } catch (error) {
@@ -581,15 +586,11 @@ function safeStringify(value) {
 }
 
 function formToPayload(formData) {
-  const selectedCategories = formData
-    .getAll("activityCategory")
+  const selectedCategories = ACTIVITY_CATEGORY_FIELDS
+    .map((fieldName) => formData.get(fieldName))
     .map((value) => String(value).trim())
     .filter(Boolean);
-  const customActivities = String(formData.get("activitiesCustom") || "")
-    .split(",")
-    .map((value) => value.trim())
-    .filter(Boolean);
-  const mergedActivities = [...new Set([...selectedCategories, ...customActivities])];
+  const mergedActivities = [...new Set(selectedCategories)].slice(0, 3);
 
   return {
     startCity: String(formData.get("startCity") || "").trim(),
@@ -624,7 +625,7 @@ function renderItinerary(planData) {
     <p id="itinerary-map-status" class="muted">Loading map locations...</p>
     <div id="itinerary-map" class="itinerary-map"></div>
     <h3>Activities</h3>
-    ${renderActivityList(itinerary.activities || [])}
+    ${renderActivityCategoryOptions(planData)}
     <h3>Safety Concerns</h3>
     ${renderSimpleList(itinerary.safetyConcerns || [], { collapseReferences: true })}
     <h3>Packing List</h3>
@@ -698,6 +699,7 @@ function renderItinerary(planData) {
   });
 
   renderItineraryMap(planData);
+  attachActivityChoiceHandlers();
   attachConfirmHandlers(planData.itineraryId);
   maybeRenderFinalAction(planData);
 }
@@ -1245,15 +1247,130 @@ function formatStay(days, nights) {
   return `${safeDays} day${safeDays === 1 ? "" : "s"} / ${safeNights} night${safeNights === 1 ? "" : "s"}`;
 }
 
-function renderActivityList(items) {
+function renderActivityCategoryOptions(planData) {
+  const items = normalizeActivities(planData?.itinerary?.activities || []);
   if (!items.length) return "<p class=\"muted\">No activities.</p>";
-  const rows = items
-    .map((activity) => {
-      const line = `${activity.scheduledDay || "Day"}: ${activity.name || "Activity"} ($${activity.estimatedCostUsd || 0})`;
-      return `<li>${escapeHtml(line)}</li>`;
+
+  const categories =
+    (planData?.requestedActivityCategories || [])
+      .map((value) => String(value).trim())
+      .filter(Boolean)
+      .slice(0, 3);
+
+  const categoriesToRender = categories.length ? categories : ["Activities"];
+  if (!currentPlan.activitySelections) {
+    currentPlan.activitySelections = {};
+  }
+
+  const cards = categoriesToRender
+    .map((category, categoryIndex) => {
+      const options = pickActivityOptionsForCategory(items, category).slice(0, 3);
+      if (!options.length) return "";
+
+      const currentSelection = currentPlan.activitySelections[category] || options[0].id;
+      currentPlan.activitySelections[category] = currentSelection;
+      const groupName = `activity-category-${slugify(category)}-${categoryIndex}`;
+
+      const optionsHtml = options
+        .map((activity) => {
+          const isChecked = activity.id === currentSelection;
+          return `
+            <label class="option">
+              <div class="inline">
+                <input class="activity-choice-input" type="radio" name="${escapeHtml(groupName)}" data-category="${escapeHtml(category)}" value="${escapeHtml(activity.id)}" ${isChecked ? "checked" : ""} />
+                <strong>${escapeHtml(activity.name)}</strong>
+              </div>
+              <div class="option-facts">
+                <div class="option-fact-row">
+                  <span class="option-fact-label">Day</span>
+                  <span class="option-fact-value">${escapeHtml(activity.scheduledDay || "Any day")}</span>
+                </div>
+                <div class="option-fact-row">
+                  <span class="option-fact-label">Estimated Cost</span>
+                  <span class="option-fact-value">${escapeHtml(formatUsd(activity.estimatedCostUsd) || "$0")}</span>
+                </div>
+              </div>
+              ${activity.notes ? `<div class="muted">${escapeHtml(activity.notes)}</div>` : ""}
+            </label>
+          `;
+        })
+        .join("");
+
+      return `
+        <section class="card activity-category-card">
+          <h4>${escapeHtml(toTitleCase(category))}</h4>
+          <p class="muted">Choose one activity option.</p>
+          <div class="component-options">${optionsHtml}</div>
+        </section>
+      `;
     })
     .join("");
-  return `<ul class=\"list\">${rows}</ul>`;
+
+  return cards || "<p class=\"muted\">No activities for selected categories.</p>";
+}
+
+function attachActivityChoiceHandlers() {
+  document.querySelectorAll(".activity-choice-input").forEach((input) => {
+    input.addEventListener("change", () => {
+      const category = input.getAttribute("data-category");
+      if (!category) return;
+      currentPlan.activitySelections = currentPlan.activitySelections || {};
+      currentPlan.activitySelections[category] = input.value;
+    });
+  });
+}
+
+function normalizeActivities(items) {
+  return items
+    .map((activity, index) => {
+      if (typeof activity === "string") {
+        return {
+          id: `activity-${index}`,
+          name: activity,
+          estimatedCostUsd: 0,
+          scheduledDay: "",
+          notes: ""
+        };
+      }
+
+      return {
+        id: String(activity?.id || `activity-${index}`),
+        name: String(activity?.name || `Activity ${index + 1}`),
+        estimatedCostUsd: Number(activity?.estimatedCostUsd || 0),
+        scheduledDay: String(activity?.scheduledDay || ""),
+        notes: String(activity?.notes || "")
+      };
+    })
+    .filter((activity) => activity.name);
+}
+
+function pickActivityOptionsForCategory(items, category) {
+  const normalizedCategory = String(category || "").toLowerCase().trim();
+  const terms = normalizedCategory
+    .split(/\s+/)
+    .map((term) => term.replace(/[^a-z]/g, ""))
+    .filter(Boolean);
+
+  const scored = items
+    .map((activity) => {
+      const haystack = `${activity.name} ${activity.notes}`.toLowerCase();
+      const score = terms.reduce((sum, term) => sum + (haystack.includes(term) ? 1 : 0), 0);
+      return { activity, score };
+    })
+    .sort((a, b) => b.score - a.score);
+
+  const withMatches = scored.filter((item) => item.score > 0).map((item) => item.activity);
+  if (withMatches.length >= 3) return withMatches.slice(0, 3);
+
+  const fallback = items.filter((activity) => !withMatches.some((matched) => matched.id === activity.id));
+  return [...withMatches, ...fallback].slice(0, 3);
+}
+
+function slugify(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 function escapeHtml(value) {
