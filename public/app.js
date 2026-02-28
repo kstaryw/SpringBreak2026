@@ -3,6 +3,7 @@ const itinerarySection = document.getElementById("itinerary");
 const messagesSection = document.getElementById("messages");
 const activitySection = document.getElementById("activity");
 const activityList = document.getElementById("activity-list");
+const progressSection = document.getElementById("progress");
 const toolMonitorSection = document.getElementById("tool-monitor");
 const toolMonitorList = document.getElementById("tool-monitor-list");
 
@@ -18,6 +19,11 @@ const TOOL_MONITOR_TYPES = new Set([
 let currentPlan = null;
 const activityGroups = new Map();
 const activityGroupMeta = new Map();
+const STAGE_FLOW = ["initialization", "research", "safety", "composition", "done"];
+const stageState = {
+  active: null,
+  completed: new Set()
+};
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -133,6 +139,9 @@ function resetTimeline() {
   activityList.innerHTML = "";
   activityGroups.clear();
   activityGroupMeta.clear();
+  stageState.active = null;
+  stageState.completed.clear();
+  renderProgressStepper();
   toolMonitorSection.classList.remove("hidden");
   toolMonitorList.innerHTML = "";
 }
@@ -140,6 +149,7 @@ function resetTimeline() {
 function addActivity(eventData) {
   const event = eventData ?? {};
   const eventType = event.type || "activity";
+  updateStageProgress(event);
   const title = event.agent
     ? `[${eventType}] ${event.agent}: ${event.message || "Update"}`
     : `[${eventType}] ${event.message || "Update"}`;
@@ -183,6 +193,41 @@ function addActivity(eventData) {
   if (TOOL_MONITOR_TYPES.has(eventType)) {
     addToolMonitorItem(event);
   }
+}
+
+function updateStageProgress(event) {
+  if (!event || !event.type || !event.stage) return;
+
+  if (event.type === "stage_started") {
+    stageState.active = event.stage;
+  }
+
+  if (event.type === "stage_completed") {
+    stageState.completed.add(event.stage);
+    if (event.stage === "composition" || event.stage === "final") {
+      stageState.completed.add("done");
+      stageState.active = null;
+    }
+  }
+
+  renderProgressStepper();
+}
+
+function renderProgressStepper() {
+  if (!progressSection) return;
+
+  const html = STAGE_FLOW.map((stage) => {
+    const isCompleted = stageState.completed.has(stage);
+    const isActive = stageState.active === stage && !isCompleted;
+    const indicator = isCompleted ? "✅" : isActive ? "⏳" : "⬜";
+    const classes = ["progress-step"];
+    if (isCompleted) classes.push("is-complete");
+    if (isActive) classes.push("is-active");
+
+    return `<span class="${classes.join(" ")}">${indicator} ${escapeHtml(stage)}</span>`;
+  }).join("");
+
+  progressSection.innerHTML = html;
 }
 
 function ensureActivityGroup(agentName) {
