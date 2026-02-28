@@ -48,18 +48,7 @@ label {
   font-size: 14px;
 }
 
-.activity-categories-field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-size: 14px;
-}
 
-.activity-categories-field textarea {
-  width: 100%;
-  resize: vertical;
-  min-height: 84px;
-}
 
 .activity-category-card {
   margin-bottom: 10px;
